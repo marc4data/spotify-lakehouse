@@ -8,7 +8,17 @@ import pandas as pd
 
 REDACTED = "<redacted>"
 SENSITIVE_FIELDS = frozenset(
-    {"email", "id", "uri", "href", "external_urls", "display_name", "images", "birthdate"}
+    {
+        "account_id",  # observed on /me 2026-09-13; not in Spotify's documented user object
+        "birthdate",
+        "display_name",
+        "email",
+        "external_urls",
+        "href",
+        "id",
+        "images",
+        "uri",
+    }
 )
 
 

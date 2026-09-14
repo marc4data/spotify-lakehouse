@@ -11,6 +11,7 @@ def test_redact_profile_masks_identifiers_keeps_analytics_fields() -> None:
         {
             "email": ["a@example.org"],
             "id": ["user-1"],
+            "account_id": ["acct-1"],
             "display_name": ["Someone"],
             "external_urls.spotify": ["https://open.spotify.com/user/user-1"],
             "country": ["US"],
@@ -18,7 +19,7 @@ def test_redact_profile_masks_identifiers_keeps_analytics_fields() -> None:
         }
     )
     out = redact_profile(df)
-    for column in ("email", "id", "display_name", "external_urls.spotify"):
+    for column in ("email", "id", "account_id", "display_name", "external_urls.spotify"):
         assert out.loc[0, column] == REDACTED
     assert out.loc[0, "country"] == "US"
     assert out.loc[0, "followers.total"] == 3

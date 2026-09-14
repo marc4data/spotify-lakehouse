@@ -1,8 +1,9 @@
 # spot-main-R-002 — Build report
 
 **Session:** `main` · **Date:** 2026-09-13 · **Commit:** `3a499cf` (scaffold) + this report
-**Status for Cowork:** everything except the credential-dependent acceptance is built and proven. The live
-OAuth login and the first real API call are **blocked on Marc** (see §6). Mark ❓, not ✅.
+**Status for Cowork:** all acceptance items are met. Marc ran the credential-dependent steps on 2026-09-13
+(PDT): OAuth login, a live probe from `main`, and a live probe from `spotify-wta` with no extra setup (§4,
+§6). Observed API shapes are in §7; new contract findings F7–F10 are in §8. Ready for Cowork review.
 
 ---
 
@@ -11,8 +12,8 @@ OAuth login and the first real API call are **blocked on Marc** (see §6). Mark 
 | Acceptance item | Result | Evidence |
 |---|---|---|
 | `make bootstrap` from clean state with `~/.config/spot/` absent prints the exact missing-credential message | ✅ | §3.1, §3.2 |
-| `make bootstrap && spot auth marc && spot probe --profile marc` writes JSON + a row | ⛔ **Blocked** — no Spotify credentials exist on this machine; `spot auth` needs Marc's browser login | §6 |
-| Worktree `spotify-wta` bootstraps and uses the same credentials with no additional setup | ✅ for everything credentials don't gate (same `.env`, same container, same `data/raw`, own schemas). `spot probe` there fails with the **same** shared-credential message as `main`, which shows it reads the shared config. A successful probe there waits on §6 | §4 |
+| `make bootstrap && spot auth marc && spot probe --profile marc` writes JSON + a row | ✅ run `probe-main-208f7c73` → 2 files in `data/raw/`, `raw.api_response` ids 5–6 | §6 |
+| Worktree `spotify-wta` bootstraps and uses the same credentials with no additional setup | ✅ run `probe-wta-8cdee8b3` from `spotify-wta` → 2 more files, ids 7–8. Same `.env`, same token store, same container, same `data/raw` | §4 |
 | Staged fake 32-hex string rejected by the hook | ✅ rejected by **two** hooks: `spot-no-spotify-secrets` and `gitleaks` | §2.1 |
 | Notebook with populated output stripped on commit | ✅ `nbstripout` | §2.2 |
 | `uv run pytest`, `uv run ruff check .`, `uv run dbt parse` pass | ✅ 64 passed · ruff clean · parse 0 errors (see §5 note on how dbt is invoked) | §2.3 |
@@ -65,6 +66,7 @@ The proof notebook was unstaged and deleted afterwards. Nothing was committed.
 |---|---|---|
 | Emptied `DISCARDED_FIELDS` in [raw_store.py](../../spotify_lakehouse/raw_store.py), so `/me` email would be persisted | `tests/test_raw_store.py::test_scrub_removes_email_from_me_without_mutating_input` — 1 failed, 4 passed | ✅ file restored, `git status` clean |
 | `alter table raw.api_response disable trigger api_response_no_update_delete` | `tests/test_migrate.py::test_raw_api_response_is_append_only` — `Failed: DID NOT RAISE RaiseException` | ✅ trigger re-enabled (`tgenabled = O` for both triggers); `raw.api_response` has 0 rows, since the test rolls back |
+| Removed `account_id` from `redact.SENSITIVE_FIELDS` (added after the live probe, F8) | `tests/test_redact.py::test_redact_profile_masks_identifiers_keeps_analytics_fields` — 1 failed, 3 passed | ✅ file restored; full suite 64 passed |
 
 After the reverts: `64 passed`, `ruff check` clean, `ruff format --check` clean, `dbt parse` 0 errors.
 
@@ -132,8 +134,23 @@ $ git worktree list
 /Users/marcalexander/projects/ai_orchestrator_claude/spotify-wta  3a499cf [feat/probe]
 ```
 
-The worktree reached parity with `main` using `.session` and `make bootstrap` alone. The one remaining
-failure is the same one `main` has. Once Marc fills the shared `.env`, both clear together.
+The worktree reached parity with `main` using `.session` and `make bootstrap` alone. Before credentials
+existed, its one failure was the same one `main` had.
+
+### Live probes after credentials were placed (Marc, 2026-09-13 PDT)
+
+`spot auth marc` was run once, in `main`. The worktree then probed with the shared token store and no other setup.
+
+| `raw.api_response.id` | Session | `source_file` | `ingested_at` (UTC) |
+|---|---|---|---|
+| 5 | main | `api/me/marc/20260914T055226Z_probe-main-208f7c73.json` | 2026-09-14 05:52:26 |
+| 6 | main | `api/me_player_recently-played/marc/20260914T055228Z_probe-main-208f7c73.json` | 2026-09-14 05:52:28 |
+| 7 | **wta** | `api/me/marc/20260914T060909Z_probe-wta-8cdee8b3.json` | 2026-09-14 06:09:09 |
+| 8 | **wta** | `api/me_player_recently-played/marc/20260914T060910Z_probe-wta-8cdee8b3.json` | 2026-09-14 06:09:10 |
+
+All four files are under the shared `~/spot-data/raw` (reached through each checkout's `data/raw` symlink)
+with mode `-rw-------`. Ids 1–4 were used by the rolled-back inserts in `test_raw_api_response_is_append_only`.
+Postgres sequences don't reuse numbers, so no rows are missing.
 
 ---
 
@@ -173,35 +190,76 @@ failure is the same one `main` has. Once Marc fills the shared `.env`, both clea
 
 ---
 
-## 6. Blocked on Marc — to finish acceptance
+## 6. Credential-dependent steps — completed by Marc
 
-1. Paste the Client ID and Client Secret into `~/.config/spot/.env`. Confirm the dashboard Redirect URI is exactly
-   `http://127.0.0.1:3000`.
-2. `make bootstrap` (should now print `Bootstrap complete for session "main"`).
-3. `uv run spot auth marc` → log in in the browser.
-4. `uv run spot probe --profile marc --shape` in `main`, then the same in `../spotify-wta`.
+| Step | Result |
+|---|---|
+| Client ID and Secret placed in `~/.config/spot/.env` | ✅ (values never read into this report or the repo) |
+| `make bootstrap` in `main` | ✅ re-run by Claude Code after the credentials were placed (see §9) |
+| `uv run spot auth marc` | ✅ refresh token stored; the probes below authenticated with it |
+| `uv run spot probe --profile marc --shape` in `main` | ✅ `probe-main-208f7c73`, ids 5–6 |
+| Same command in `spotify-wta` | ✅ `probe-wta-8cdee8b3`, ids 7–8 |
 
 (`spot` is installed into the project venv, so the commands are `uv run spot ...`, not bare `spot ...`.)
 
-Step 4's `--shape` output prints key paths and types only, never values. It fills §7's "observed" column.
-
-**GitHub:** `marc4data/spotify-lakehouse` does not exist yet (`gh repo view` → not found). Nothing was pushed, so
-CI has not run on GitHub. Creating the public repo is Marc's call.
+**GitHub:** `marc4data/spotify-lakehouse` does not exist yet. Nothing was pushed, so CI has not run on GitHub.
+Creating the public repo is Marc's call.
 
 ---
 
 ## 7. `/me` and `recently-played` — observed vs documented
 
-**Observed: not yet.** No call reached Spotify this round (see §6). Documented shape, from Spotify's reference:
+Source: the four saved response files (two runs, profile `marc`), read for **key paths and JSON types only**.
+No values appear here except `product` and counts, which don't identify anyone. Both runs had identical shapes.
 
-| Endpoint | Documented top-level fields |
-|---|---|
-| `GET /me` | `country`, `display_name`, `email`, `explicit_content{filter_enabled,filter_locked}`, `external_urls`, `followers{href,total}`, `href`, `id`, `images[]`, `product`, `type`, `uri` |
-| `GET /me/player/recently-played` | `href`, `limit`, `next`, `cursors{after,before}`, `total`, `items[]{track, played_at, context}`; `context` may be null |
+### 7.1 `GET /me`
 
-`spot probe --shape` records the real shape. Some `/me` fields (`email`, `country`, `product`) depend on scopes
-and possibly on dev-mode policy, and the probe summary reports each as present or not returned. That also
-bears on R-016 (`product` shows Premium status).
+| Field | Documented | Observed | Note |
+|---|---|---|---|
+| `id`, `uri`, `href`, `type`, `display_name` | ✅ | ✅ `str` | Identifiers; redacted in every display |
+| `external_urls.spotify` | ✅ | ✅ `str` | |
+| `country` | ✅ | ✅ `str` | |
+| `product` | ✅ | ✅ `"premium"` | Owner account; R-016 is about *added* users and still needs one of them |
+| `explicit_content{filter_enabled, filter_locked}` | ✅ | ✅ `bool`, `bool` | |
+| `followers{href, total}` | ✅ | ✅ `href` is **null**, `total` is `int` | |
+| `images` | ✅ | ✅ **empty list** in both runs | |
+| `email` | ✅ | **Absent from saved files** | The scrub runs before save, so the files can't show whether Spotify sent it. The `user-read-email` scope isn't requested, so Spotify shouldn't return it (see F7) |
+| `account_id` | ❌ **not documented** | ✅ `str` | Undocumented account identifier. **Fixed this round:** added to `redact.SENSITIVE_FIELDS` with a test (see F8) |
+
+### 7.2 `GET /me/player/recently-played?limit=50`
+
+| Field | Documented | Observed |
+|---|---|---|
+| `href`, `limit` | ✅ | ✅ `limit = 50` |
+| `items[]` | ✅ | ✅ **50 items** in each run |
+| `cursors{after, before}` | ✅ | ✅ both `str` |
+| `next` | ✅ (nullable) | ✅ **non-null `str`** in both runs (see F10) |
+| `total` | ✅ | ❌ **absent** |
+| `items[].played_at` | ✅ | ✅ `str` (ISO timestamp) |
+| `items[].context{type, href, uri, external_urls}` | ✅ nullable | ✅ `dict`; **null on 2 of 50** items in each run |
+| `items[].track` | full track object | ✅ `dict`. `track.type` = `track` on all 100 items; no episodes seen (consistent with CLAUDE.md §4, though it doesn't prove episodes are excluded) |
+
+**Track fields observed:** `id`, `uri`, `href`, `name`, `type`, `duration_ms` (int), `explicit`, `disc_number`,
+`track_number`, `is_local`, `is_playable`, `external_urls.spotify`, **`external_ids.isrc`** (see F9),
+`artists[]{id, uri, href, name, type, external_urls}`, and `album{id, uri, href, name, type, album_type,
+release_date, release_date_precision, total_tracks, is_playable, images[]{url, height, width},
+artists[], external_urls}`.
+
+**Track fields not returned** that the historical full track object carried: `popularity`,
+`available_markets` (on both track and album), `preview_url`. None is in any contract, so nothing breaks.
+
+**Artist objects are simplified: no `genres`.** Genres need `GET /artists/{id}`, as `dim_artist` (SCD2) already
+assumes. Expected, not a finding.
+
+### 7.3 Implications for the model
+
+| Contract column | Fed by | Status |
+|---|---|---|
+| `fct_play_event.ended_at_utc` (API) | `items[].played_at` | ✅ present |
+| `dim_content.content_uri` / `content_type` / `duration_ms` | `track.uri`, `track.type`, `track.duration_ms` | ✅ present |
+| `dim_content.parent_name` / `primary_creator_name` | `track.album.name` / `track.album.artists[0].name` | ✅ present |
+| `dim_profile.spotify_user_id` | `/me.id` | ✅ present |
+| `fct_play_event.ms_played` (API rows) | — | NULL by contract; confirmed there is no duration-played field |
 
 ---
 
@@ -214,7 +272,11 @@ bears on R-016 (`product` shows Premium status).
 | F3 | data-contracts §1 vs §3 | `raw.*.profile_key` is `text` (holds the slug, `marc`), while `dim_profile.profile_key` is an int surrogate. One name, two meanings, and the staging join will be confusing. | Rename the raw column `profile_slug`. |
 | F4 | Prompt acceptance #1 | "`make bootstrap` **succeeds** … with `~/.config/spot/` absent, **printing the missing-credential message**" contradicts itself: a missing credential can't be both a success and a reported failure. Built as: every step that doesn't need Spotify completes, then the script exits non-zero naming `credentials-missing`. | Reword to "completes all non-credential steps and fails naming the missing keys." |
 | F5 | worktree-protocol §2 | "target schema from `SPOT_SESSION` env" doesn't say who sets the variable. Solved with `scripts/dbt.sh`; bare `uv run dbt` requires it exported. | Name `make dbt-*` / `scripts/dbt.sh` as the supported entry point. |
-| F6 | `docs/spotify-data-access-guide.md` | "Last verified … **September 14, 2026**" is one day in the future relative to this round (2026-09-13). | Correct the date. |
+| F6 | `docs/spotify-data-access-guide.md` | "Last verified … **September 14, 2026**" is one day in the future relative to this round (2026-09-13). | **Withdrawn.** The round started 2026-09-13 18:17 PDT, which was already 2026-09-14 in UTC. The date is right in UTC. |
+| F7 | data-contracts §3 (`dim_profile`) | "The extractor reads [email] from `/me` to match accounts and discards it." The scope set in the access guide (and in `auth.SCOPES`) does **not** include `user-read-email`, so the extractor never receives an email to match on. Accounts are matched on `/me.id` instead: `spot auth` refuses to bind one Spotify `id` to two profile slugs. | Reword §3: "Accounts are matched on `spotify_user_id`. `user-read-email` is never requested, so email never reaches the extractor." That makes "email is never stored" structural, not procedural. Keep the scrub as a backstop. |
+| F8 | data-contracts §3, CLAUDE.md §5 | `/me` returns **`account_id`**, which isn't in Spotify's documented user object. It's an account identifier (CLAUDE.md §5: never in the git tree). It lives in `raw.api_response` (local only) and is now redacted in displays. No contract mentions it. | Decide whether staging drops `account_id`, as it drops `ip_addr`/`user_agent` (§2), or carries it on `dim_profile`. Recommend dropping it: nothing in the model needs it. |
+| F9 | data-contracts §3 / §5 | Recently-played track objects carry **`external_ids.isrc`**, a recording-level identifier that stays the same when a track is re-issued under a new URI. That's the problem behind §3's "unresolvable content" caution and §5's single-vs-album miss. The export doesn't carry ISRC, so it's available only for API-resolved content. | Consider `isrc` on `dim_track_detail`, and ISRC as the first tier of the loose match mode in §5 (fall back to `content_match_key`). Not required for phase 1. |
+| F10 | CLAUDE.md §4 | "`recently-played` … **cannot page backwards into the past.**" Both runs returned a **non-null `next`** URL and a `cursors.before` value. **Not tested:** following `next` would be an extra API call outside this round's scope. If it returns plays older than the first 50, the "no history" claim is too strong. If it returns an empty list, the claim holds. | One-call check (following `next` once) before R-017 designs the poller. Either result belongs in CLAUDE.md §4 as observed, not assumed. |
 
 ---
 
@@ -222,9 +284,10 @@ bears on R-016 (`product` shows Premium status).
 
 | Item | State |
 |---|---|
+| `make bootstrap` (after credentials) | ✅ `Bootstrap complete for session "main"`; `.env` and `tokens.json` both `-rw-------`; token store holds profile `marc` only |
 | `uv run pytest` | ✅ 64 passed (DB integration tests ran against live `spot-postgres`) |
 | `uv run dbt build` | n/a — no models this round by instruction; `dbt parse` ✅ |
 | `ruff check` / `ruff format --check` | ✅ |
 | Pre-commit on staged files, gitleaks included | ✅ all hooks passed on `3a499cf` |
-| A guard proven to fail | ✅ §2 (four guards) |
+| A guard proven to fail | ✅ §2 (five guards, including the `account_id` redaction added after the live probe) |
 | Build report | this file |
