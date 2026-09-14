@@ -1,0 +1,28 @@
+# One Postgres for every checkout. The fixed project name and container name mean `docker compose up`
+# from main, spotify-wta or spotify-wtb all address the same container and volume.
+# Credentials come from ~/.config/spot/.env via `--env-file` (see Makefile).
+name: spot
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: spot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: spot
+      POSTGRES_USER: ${SPOT_PG_USER:?SPOT_PG_USER must be set in ~/.config/spot/.env}
+      POSTGRES_PASSWORD: ${SPOT_PG_PASSWORD:?SPOT_PG_PASSWORD must be set in ~/.config/spot/.env}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - spot_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d spot"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  spot_pgdata:
+    name: spot_pgdata

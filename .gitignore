@@ -1,0 +1,30 @@
+# --- Secrets (CLAUDE.md §5). Real credentials live in ~/.config/spot/, outside the repo. ---
+.env
+.env.*
+!.env.example
+tokens*.json
+
+# --- Personal data and derived outputs. Anchored to the root so claude_work/reports/ stays tracked. ---
+/data/
+/published/
+/reports/
+*.hyper
+
+# --- Session identity is per checkout (docs/worktree-protocol.md §1) ---
+.session
+
+# --- Python / tooling ---
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- dbt ---
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+logs/
+
+.DS_Store

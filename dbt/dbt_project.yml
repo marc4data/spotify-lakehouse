@@ -1,0 +1,21 @@
+name: spotify_lakehouse
+version: "0.1.0"
+profile: spot
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["../seeds"]
+clean-targets: ["target", "dbt_packages"]
+
+# Schemas are session-scoped; see macros/generate_schema_name.sql.
+# Convention: one .yml per model file (models/marts/fct_play_event.yml beside fct_play_event.sql).
+models:
+  spotify_lakehouse:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    marts:
+      +materialized: table
+      +schema: mart

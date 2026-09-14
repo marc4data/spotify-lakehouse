@@ -1,0 +1,43 @@
+# CLAUDE.md §5 — all of these are required. Install with `make bootstrap`.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      # Built from source by pre-commit (it provisions Go itself), so it works in every worktree
+      # without a system install or a Docker bind mount.
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: spot-no-spotify-secrets
+        name: spot — reject 32-hex strings and personal email addresses
+        entry: python3 scripts/hooks/check_secrets.py
+        language: system
+        types: [text]
+        exclude: ^uv\.lock$
+      - id: spot-no-personal-data-paths
+        name: spot — reject files under data/, published/, reports/
+        entry: "Files under data/, published/ and reports/ are personal data and must never be committed (CLAUDE.md §5)."
+        language: fail
+        files: ^(data|published|reports)/
+
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.9.1
+    hooks:
+      - id: nbstripout
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.7
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-merge-conflict
+      - id: check-yaml

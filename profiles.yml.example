@@ -1,0 +1,28 @@
+# dbt profile for spotify-lakehouse — TEMPLATE ONLY.
+# The real profile lives in ~/.dbt/profiles.yml (`make dbt-profile` appends this block).
+# No literal credentials: every secret is read from the environment, which scripts/dbt.sh
+# populates from ~/.config/spot/.env and .session.
+spot:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: 127.0.0.1
+      port: 5433
+      dbname: spot
+      user: "{{ env_var('SPOT_PG_USER') }}"
+      password: "{{ env_var('SPOT_PG_PASSWORD') }}"
+      # Session-scoped: stg_main, stg_wta, ... No default — an unset SPOT_SESSION fails loudly.
+      schema: "stg_{{ env_var('SPOT_SESSION') }}"
+      threads: 4
+    prod:
+      # Promotion target. Custom-schema models land in `analytics`; `make promote` (later round)
+      # refuses to run unless .session is `main`.
+      type: postgres
+      host: 127.0.0.1
+      port: 5433
+      dbname: spot
+      user: "{{ env_var('SPOT_PG_USER') }}"
+      password: "{{ env_var('SPOT_PG_PASSWORD') }}"
+      schema: stg_main
+      threads: 4

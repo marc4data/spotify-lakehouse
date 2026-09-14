@@ -1,0 +1,64 @@
+# spotify-lakehouse
+
+A local Postgres warehouse of Spotify listening data for one family, modeled to Kimball dimensional
+standards and surfaced through Jupyter notebooks and Tableau Public.
+
+Governing documents: [CLAUDE.md](CLAUDE.md), [docs/data-contracts.md](docs/data-contracts.md),
+[docs/worktree-protocol.md](docs/worktree-protocol.md).
+
+> **This repository is public and the data is personal.** No credential, token, account identifier,
+> raw export, or notebook output is ever committed. See CLAUDE.md §5.
+
+## Quick start
+
+```bash
+echo main > .session          # untracked; `wta`, `wtb`... in a worktree
+make bootstrap                # uv sync, ~/.config/spot/, Postgres, migrations, hooks
+# first run: fill in the Spotify Client ID/Secret it names, then re-run
+make dbt-profile              # once per machine: adds the `spot` profile to ~/.dbt/profiles.yml
+uv run spot auth marc         # browser login; refresh token -> ~/.config/spot/tokens.json
+uv run spot probe --profile marc
+```
+
+## New worktree
+
+```bash
+git worktree add ../spotify-wta -b feat/<topic>
+echo wta > ../spotify-wta/.session
+cd ../spotify-wta && make bootstrap     # same credentials, same database, no other setup
+```
+
+## Layout
+
+| Path | What |
+|---|---|
+| `spotify_lakehouse/` | Python package: `config`, `auth`, `api`, `db`, `migrate`, `raw_store`, `redact`, `cli` |
+| `migrations/` | Numbered SQL for the shared `raw` schema. Never edit an applied file; add a new one. |
+| `dbt/` | dbt-postgres project. Schemas `stg_<session>`, `mart_<session>`; `analytics` is main-only. |
+| `seeds/` | Marc-editable seed files (e.g. `genre_bucket_map.csv`) |
+| `notebooks/` | Committed with outputs stripped (nbstripout) |
+| `scripts/` | `bootstrap.sh`, `dbt.sh`, pre-commit hooks |
+| `data/raw` | Symlink to `~/spot-data/raw`. Gitignored. |
+
+## Commands
+
+| Command | Does |
+|---|---|
+| `uv run spot auth <profile>` | OAuth Authorization Code login at `http://127.0.0.1:3000` |
+| `uv run spot probe --profile <p> [--shape]` | `GET /me` + `GET /me/player/recently-played`; writes `data/raw/` and `raw.api_response` |
+| `uv run spot migrate` / `make migrate` | Apply raw migrations; create this session's schemas |
+| `make dbt-parse` | `dbt parse` with `SPOT_SESSION` from `.session` |
+| `make test`, `make lint` | pytest; ruff check + format check |
+
+## dbt conventions
+
+- **One `.yml` per model file.** `models/marts/fct_play_event.yml` sits beside
+  `fct_play_event.sql`. Never a directory-wide `schema.yml` — parallel worktrees would conflict on it.
+- Layers: `staging` → `intermediate` → `marts`. Lowercase SQL, trailing commas, CTEs over subqueries.
+- `_key` surrogate keys, `_id` source natural keys, `_uri` Spotify URIs. Timestamps `timestamptz` UTC;
+  durations integer milliseconds.
+- Run dbt through `scripts/dbt.sh` (or `make dbt-parse`), which sets `SPOT_SESSION` from `.session`.
+
+## License
+
+MIT
