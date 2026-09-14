@@ -39,10 +39,12 @@ tar -xzf "$workdir/$tarball" -C "$workdir" gitleaks
 "$workdir/gitleaks" version
 
 echo "commits reachable from any ref: $(git -C "$REPO" rev-list --all --count)"
-# `--log-opts=--all` makes the scope explicit: every commit reachable from every ref, not a range.
+# Scope: every commit reachable from every ref, never a range. --log-opts REPLACES gitleaks' default git
+# arguments rather than adding to them, so this is v8.30.0's own default (read from --log-level=debug)
+# written out in full. That pins the scope even if a future version changes its default.
 "$workdir/gitleaks" git "$REPO" \
   --config "$CONFIG" \
-  --log-opts="--all" \
+  --log-opts="--full-history --all --diff-filter=tuxdb" \
   --redact \
   --no-banner \
   --no-color \
