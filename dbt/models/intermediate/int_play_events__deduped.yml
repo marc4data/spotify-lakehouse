@@ -37,3 +37,26 @@ unit_tests:
         - {profile_slug: alpha, content_uri: "spotify:track:t2", ended_at_utc: "2026-01-01 12:00:40+00", source_system: api, raw_response_id: 4}
         - {profile_slug: alpha, content_uri: "spotify:track:t1", ended_at_utc: "2026-01-01 12:01:05+00", source_system: api, raw_response_id: 5}
         - {profile_slug: alpha, content_uri: "spotify:track:t3", ended_at_utc: "2026-01-01 12:05:30+00", source_system: export, raw_response_id: 7}
+
+  - name: identical_window_polled_twice_adds_no_plays
+    description: >
+      spot-main-R-017 required test 3 (idempotence), at the model boundary: two polls that capture the
+      same unchanged window produce twice the raw items and exactly the same plays, each keeping the
+      lineage of the poll that saw it first.
+    model: int_play_events__deduped
+    given:
+      - input: ref('int_play_events__unioned')
+        rows:
+          # poll A (raw 10)
+          - {profile_slug: alpha, content_uri: "spotify:track:a", ended_at_utc: "2026-09-14 08:00:01+00", source_system: api, ingested_at: "2026-09-14 09:00:00+00", raw_response_id: 10, item_ordinal: 1}
+          - {profile_slug: alpha, content_uri: "spotify:track:b", ended_at_utc: "2026-09-14 08:04:30+00", source_system: api, ingested_at: "2026-09-14 09:00:00+00", raw_response_id: 10, item_ordinal: 2}
+          - {profile_slug: alpha, content_uri: "spotify:track:a", ended_at_utc: "2026-09-14 08:09:59+00", source_system: api, ingested_at: "2026-09-14 09:00:00+00", raw_response_id: 10, item_ordinal: 3}
+          # poll B (raw 11), thirty minutes later, same window
+          - {profile_slug: alpha, content_uri: "spotify:track:a", ended_at_utc: "2026-09-14 08:00:01+00", source_system: api, ingested_at: "2026-09-14 09:30:00+00", raw_response_id: 11, item_ordinal: 1}
+          - {profile_slug: alpha, content_uri: "spotify:track:b", ended_at_utc: "2026-09-14 08:04:30+00", source_system: api, ingested_at: "2026-09-14 09:30:00+00", raw_response_id: 11, item_ordinal: 2}
+          - {profile_slug: alpha, content_uri: "spotify:track:a", ended_at_utc: "2026-09-14 08:09:59+00", source_system: api, ingested_at: "2026-09-14 09:30:00+00", raw_response_id: 11, item_ordinal: 3}
+    expect:
+      rows:
+        - {content_uri: "spotify:track:a", ended_at_utc: "2026-09-14 08:00:01+00", raw_response_id: 10}
+        - {content_uri: "spotify:track:b", ended_at_utc: "2026-09-14 08:04:30+00", raw_response_id: 10}
+        - {content_uri: "spotify:track:a", ended_at_utc: "2026-09-14 08:09:59+00", raw_response_id: 10}

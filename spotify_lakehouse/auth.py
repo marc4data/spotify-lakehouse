@@ -256,6 +256,13 @@ def get_access_token(
         return store[slug]["access_token"]
 
 
+def stored_profiles() -> list[str]:
+    """Profile slugs that have a stored refresh token (the fact API access actually rests on)."""
+    with _locked_store() as path:
+        store = _read_store(path)
+    return sorted(slug for slug, entry in store.items() if entry.get("refresh_token"))
+
+
 def invalidate(slug: str) -> None:
     """Mark a profile's access token expired so the next call refreshes it (used on HTTP 401)."""
     with _locked_store() as path:

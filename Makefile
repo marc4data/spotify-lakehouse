@@ -2,7 +2,8 @@ SHELL := /bin/bash
 CONFIG_DIR ?= $(HOME)/.config/spot
 COMPOSE := docker compose --env-file $(CONFIG_DIR)/.env
 
-.PHONY: help bootstrap db-up db-down migrate dbt-parse dbt-build dbt-test dbt-profile test lint format
+.PHONY: help bootstrap db-up db-down migrate dbt-parse dbt-build dbt-test dbt-profile test lint format \
+	launchd-install launchd-uninstall refresh-status
 
 help:
 	@echo "bootstrap    one command to make this checkout fully operational (idempotent)"
@@ -34,6 +35,15 @@ dbt-build:
 
 dbt-test:
 	scripts/dbt.sh test
+
+launchd-install:
+	scripts/launchd.sh install
+
+launchd-uninstall:
+	scripts/launchd.sh uninstall
+
+refresh-status:
+	uv run spot refresh --status
 
 dbt-profile:
 	scripts/install_dbt_profile.sh

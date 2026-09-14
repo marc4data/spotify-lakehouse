@@ -11,13 +11,14 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 import structlog
 
-from spotify_lakehouse import auth, migrate, profiles
+from spotify_lakehouse import auth, migrate, poller, profiles
 from spotify_lakehouse.api import SpotifyApiError, SpotifyClient
 from spotify_lakehouse.artists import artist_ids_to_fetch
 from spotify_lakehouse.config import ConfigError, load_settings, session
-from spotify_lakehouse.db import connect, refresh_lock
+from spotify_lakehouse.db import connect, refresh_lock, try_refresh_lock
 from spotify_lakehouse.paging import (
     MAX_FOLLOW_NEXT,
     RECENTLY_PLAYED_PATH,
@@ -219,6 +220,98 @@ def cmd_extract_artists(args: argparse.Namespace) -> int:
     return 0
 
 
+def _iso(value: datetime | None) -> str:
+    if value is None:
+        return "none"
+    return value.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _refresh_line(stamp: str, run_id: str, outcome: poller.PollOutcome) -> str:
+    window = outcome.window
+    verdict = (
+        f"OVERFLOW GAP RECORDED {_iso(outcome.gap.start)} .. {_iso(outcome.gap.end)} "
+        f"({outcome.gap.items_returned} items returned; plays in this interval may be lost)"
+        if outcome.gap
+        else "no gap"
+    )
+    return (
+        f"{stamp} spot refresh {run_id} {outcome.profile}: items={window.items_returned} "
+        f"window {_iso(window.oldest)} .. {_iso(window.newest)} "
+        f"high-water-before={_iso(outcome.previous_high_water_mark)} "
+        f"raw_id={outcome.raw_response_id} poll_id={outcome.poll_run_id}: {verdict}"
+    )
+
+
+def _refresh_status() -> int:
+    now = datetime.now(UTC)
+    stale_after = 2 * poller.POLL_INTERVAL_SECONDS
+    with connect(load_settings(require_spotify=False)) as conn:
+        to_poll, without_token = poller.api_profiles(conn)
+        print(f"spot refresh --status  as of {_iso(now)}")
+        print(f"launchd agent {poller.LAUNCHD_LABEL}: {poller.launchd_state()}")
+        if not to_poll and not without_token:
+            print("no profiles in spot_meta.profile_registry (run `spot sync-profiles`)")
+        for slug in to_poll + without_token:
+            s = poller.profile_status(conn, slug, now)
+            age = (now - s.last_ok_at).total_seconds() if s.last_ok_at else None
+            freshness = (
+                "never polled"
+                if age is None
+                else f"{int(age // 60)} min ago" + (" — STALE" if age > stale_after else "")
+            )
+            last_gap = ""
+            if s.last_gap:
+                last_gap = f"; last gap {_iso(s.last_gap.start)} .. {_iso(s.last_gap.end)}"
+            print(
+                f"  {slug}: token {'yes' if s.has_token else 'NO (skipped)'}; "
+                f"last successful poll {_iso(s.last_ok_at)} ({freshness}); "
+                f"last poll status {s.last_poll_status or 'none'}; "
+                f"polls in 24 h {s.polls_24h} (errors {s.errors_24h}); "
+                f"high-water mark {_iso(s.high_water_mark)}; "
+                f"overflow gaps recorded {s.gap_count}{last_gap}"
+            )
+    return 0
+
+
+def cmd_refresh(args: argparse.Namespace) -> int:
+    if args.status:
+        return _refresh_status()
+    stamp = f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ}"
+    run_id = f"refresh-{session()}-{uuid.uuid4().hex[:8]}"
+    failures = 0
+    with (
+        connect(load_settings(require_spotify=False), autocommit=True) as conn,
+        try_refresh_lock(conn) as acquired,
+    ):
+        if not acquired:
+            print(
+                f"{stamp} spot refresh: spot_refresh lock is held elsewhere; "
+                "skipped, nothing recorded"
+            )
+            return 0
+        settings = load_settings()
+        to_poll, without_token = poller.api_profiles(conn)
+        for slug in without_token:
+            print(f"{stamp} spot refresh: {slug} has no stored token; skipped (spot auth {slug})")
+        if not to_poll:
+            print(f"{stamp} spot refresh: no API-enabled profiles to poll", file=sys.stderr)
+            return 1
+        for slug in to_poll:
+            started_at = datetime.now(UTC)
+            try:
+                with SpotifyClient.for_profile(slug, settings) as api:
+                    outcome = poller.poll_profile(api, conn, slug, run_id)
+            except (SpotifyApiError, auth.AuthError, httpx.HTTPError) as exc:
+                failures += 1
+                poller.record_poll_error(
+                    conn, run_id=run_id, profile=slug, started_at=started_at, message=str(exc)
+                )
+                print(f"{stamp} spot refresh {run_id} {slug}: FAILED: {exc}", file=sys.stderr)
+                continue
+            print(_refresh_line(stamp, run_id, outcome))
+    return 1 if failures else 0
+
+
 def _follow_next_count(value: str) -> int:
     try:
         count = int(value)
@@ -252,6 +345,17 @@ def build_parser() -> argparse.ArgumentParser:
         f"{MAX_FOLLOW_NEXT}); every page is persisted",
     )
     p_probe.set_defaults(func=cmd_probe)
+
+    p_refresh = sub.add_parser(
+        "refresh",
+        help="poll recently-played once for every API-enabled profile and record overflow gaps",
+    )
+    p_refresh.add_argument(
+        "--status",
+        action="store_true",
+        help="last successful poll, high-water mark and gaps per profile; makes no API call",
+    )
+    p_refresh.set_defaults(func=cmd_refresh)
 
     p_artists = sub.add_parser(
         "extract-artists", help="GET /artists/{id} for every artist credited in recently-played"

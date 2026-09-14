@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd user agent for `spot refresh` (spot-main-R-017). TEMPLATE: `make launchd-install` fills the
+  __PLACEHOLDERS__ with absolute paths and writes the result to ~/Library/LaunchAgents/, outside the repo.
+  Installed once, from the main checkout only (docs/worktree-protocol.md §3).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.spot.refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO__/scripts/refresh_agent.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>SPOT_UV</key>
+        <string>__UV__</string>
+        <key>SPOT_LOG_DIR</key>
+        <string>__LOG_DIR__</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- The wrapper writes and rotates refresh.log itself; these catch only failures to launch it. -->
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/launchd.err.log</string>
+</dict>
+</plist>

@@ -84,6 +84,31 @@ def apply(conn: psycopg.Connection, directory: Path | None = None) -> list[str]:
     return applied_now
 
 
+def pending(conn: psycopg.Connection, directory: Path | None = None) -> list[str]:
+    """Filenames not yet applied. Read-only: never creates, applies or records anything.
+
+    Raises MigrationError if an applied migration was edited, exactly as apply() would.
+    """
+    exists = conn.execute(
+        "select to_regclass('spot_meta.schema_migrations') is not null"
+    ).fetchone()
+    applied: dict[int, str] = {}
+    if exists and exists[0]:
+        applied = dict(
+            conn.execute("select version, checksum from spot_meta.schema_migrations").fetchall()
+        )
+    unapplied = []
+    for migration in discover(directory):
+        if migration.version not in applied:
+            unapplied.append(migration.filename)
+        elif applied[migration.version] != migration.checksum:
+            raise MigrationError(
+                f"{migration.filename} was edited after it was applied. "
+                "Never edit an applied migration; add a new numbered file instead."
+            )
+    return unapplied
+
+
 def ensure_session_schemas(conn: psycopg.Connection, session_name: str) -> tuple[str, str]:
     """Create stg_<session> and mart_<session> if absent. Never touches `analytics`."""
     schemas = (stg_schema(session_name), mart_schema(session_name))

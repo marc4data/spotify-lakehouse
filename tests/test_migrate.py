@@ -1,14 +1,13 @@
 from __future__ import annotations
 
+import shutil
 import uuid
 from pathlib import Path
 
 import pytest
 
 from spotify_lakehouse import migrate
-from spotify_lakehouse.config import ConfigError, load_settings
-
-REAL_MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations"
+from tests.conftest import REAL_MIGRATIONS
 
 
 def test_real_migrations_are_contiguous_and_well_named() -> None:
@@ -29,31 +28,11 @@ def test_gap_rejected(tmp_path: Path) -> None:
         migrate.discover(tmp_path)
 
 
-# --- Integration: runs only when the shared Postgres is reachable. Leaves nothing behind. --------
+# --- Integration: shared Postgres. The `db` fixture never applies migrations. ---------------
 
 
 class _Rollback(Exception):
     pass
-
-
-@pytest.fixture
-def conn():
-    psycopg = pytest.importorskip("psycopg")
-    try:
-        settings = load_settings(require_spotify=False)
-        connection = psycopg.connect(
-            host=settings.pg_host,
-            port=settings.pg_port,
-            dbname=settings.pg_database,
-            user=settings.pg_user,
-            password=settings.pg_password,
-            connect_timeout=2,
-        )
-    except (ConfigError, psycopg.OperationalError) as exc:
-        pytest.skip(f"database not available: {exc.__class__.__name__}")
-    migrate.apply(connection, REAL_MIGRATIONS)
-    yield connection
-    connection.close()
 
 
 def _in_rolled_back_transaction(conn, work) -> None:
@@ -65,65 +44,76 @@ def _in_rolled_back_transaction(conn, work) -> None:
         pass
 
 
-def test_migrate_is_idempotent(conn) -> None:
-    assert migrate.apply(conn, REAL_MIGRATIONS) == []
+def test_pending_lists_unapplied_without_applying_them(db, tmp_path: Path) -> None:
+    for path in REAL_MIGRATIONS.glob("*.sql"):
+        shutil.copy(path, tmp_path / path.name)
+    next_version = len(migrate.discover(REAL_MIGRATIONS)) + 1
+    extra = f"{next_version:04d}_pytest_never_applied.sql"
+    (tmp_path / extra).write_text("create table pytest_must_not_exist (id int);")
+
+    before = db.execute("select count(*) from spot_meta.schema_migrations").fetchone()
+    assert migrate.pending(db, tmp_path) == [extra]
+    after = db.execute("select count(*) from spot_meta.schema_migrations").fetchone()
+    exists = db.execute("select to_regclass('public.pytest_must_not_exist')").fetchone()
+    assert before == after
+    assert exists == (None,)
 
 
-def test_raw_api_response_is_append_only(conn) -> None:
+def test_raw_api_response_is_append_only(db) -> None:
     import psycopg
 
     marker = f"pytest-{uuid.uuid4().hex[:8]}"
 
     def work() -> None:
-        row = conn.execute(
+        row = db.execute(
             "insert into raw.api_response (feed, payload, source_file, profile_slug) "
             "values ('pytest', '{}'::jsonb, %s, 'pytest') returning id",
             (marker,),
         ).fetchone()
         with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
-            conn.execute("update raw.api_response set profile_slug = 'x' where id = %s", row)
+            db.execute("update raw.api_response set profile_slug = 'x' where id = %s", row)
 
-    _in_rolled_back_transaction(conn, work)
-    left = conn.execute(
+    _in_rolled_back_transaction(db, work)
+    left = db.execute(
         "select count(*) from raw.api_response where source_file = %s", (marker,)
     ).fetchone()
     assert left == (0,)
 
 
-def test_raw_api_response_requires_feed(conn) -> None:
+def test_raw_api_response_requires_feed(db) -> None:
     import psycopg
 
     def work() -> None:
         with pytest.raises(psycopg.errors.NotNullViolation):
-            conn.execute(
+            db.execute(
                 "insert into raw.api_response (payload, source_file, profile_slug) "
                 "values ('{}'::jsonb, 'pytest', 'pytest')"
             )
 
-    _in_rolled_back_transaction(conn, work)
+    _in_rolled_back_transaction(db, work)
 
 
-def test_raw_api_response_feed_format_is_checked(conn) -> None:
+def test_raw_api_response_feed_format_is_checked(db) -> None:
     import psycopg
 
     def work() -> None:
         with pytest.raises(psycopg.errors.CheckViolation, match="api_response_feed_format"):
-            conn.execute(
+            db.execute(
                 "insert into raw.api_response (feed, payload, source_file, profile_slug) "
                 "values ('Recently-Played', '{}'::jsonb, 'pytest', 'pytest')"
             )
 
-    _in_rolled_back_transaction(conn, work)
+    _in_rolled_back_transaction(db, work)
 
 
-def test_profile_registry_rejects_unknown_role(conn) -> None:
+def test_profile_registry_rejects_unknown_role(db) -> None:
     import psycopg
 
     def work() -> None:
         with pytest.raises(psycopg.errors.CheckViolation):
-            conn.execute(
+            db.execute(
                 "insert into spot_meta.profile_registry "
                 "(profile_slug, household_role, home_timezone) values ('pytest', 'parent', 'UTC')"
             )
 
-    _in_rolled_back_transaction(conn, work)
+    _in_rolled_back_transaction(db, work)
