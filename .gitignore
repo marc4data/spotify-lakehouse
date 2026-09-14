@@ -4,7 +4,7 @@
 !.env.example
 tokens*.json
 
-# --- Personal data and derived outputs. Anchored to the root so claude_work/reports/ stays tracked. ---
+# --- Personal data and derived outputs. Anchored to the root so a nested reports/ dir is not swept up. ---
 /data/
 /published/
 /reports/

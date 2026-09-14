@@ -30,7 +30,7 @@ Cowork **owns**:
   policy. This is a statement about *what the data means*, which is a business decision.
 - Business definitions — what counts as a "listen," how genre buckets roll up, how a playlist
   "overlap" is defined.
-- The request register (`claude_work/spot_request_register.md`) and R-numbers.
+- The request register (`~/projects/ai_orchestrator_claude/spotify-pm/register.md`) and R-numbers.
 - Prompt authoring, sequencing, acceptance criteria, round review.
 - Verification that a build report matches the repository.
 
@@ -68,12 +68,21 @@ and a second copy is a copy that drifts.
 |---|---|
 | **abbr** | `spot` |
 | **sessions** | `main` (primary checkout) · `wta`, `wtb`, … (worktrees). Each checkout holds an untracked `.session` file naming itself. |
-| **register** | `claude_work/spot_request_register.md` |
+| **register** | `~/projects/ai_orchestrator_claude/spotify-pm/register.md` — **outside this repo** (R-032) |
 | **id shape** | `spot-<session>-R-###` — e.g. `spot-wta-R-019`. Short form `R-###`. |
-| **repo root** | `~/projects/ai_orchestrator_claude/spotify` (worktrees: `spotify-<session>`). Cowork reaches it only through the device bridge, mounted at `$HOME/mnt/spotify`. |
+| **repo root** | `~/projects/ai_orchestrator_claude/spotify` (worktrees: `spotify-<session>`). Cowork's connection moves to the PM folder (R-032); until Marc switches it, Cowork reaches this repo through the device bridge at `$HOME/mnt/spotify`. |
 
-Prompts and reports live beside the register, at `claude_work/prompts/<id>.md` and
-`claude_work/reports/<id>-report.md`.
+Prompts and reports live beside the register, **outside this repo**, in the PM folder
+`~/projects/ai_orchestrator_claude/spotify-pm/`: `prompts/<id>.md` and `reports/<id>-report.md` (R-032).
+The PM folder is **its own git repository, not a worktree of this one.** Every checkout — `main` and every
+`spotify-<session>` worktree — reads it by absolute path, so **an uncommitted prompt there is readable**:
+the round skill's "written but not committed" state no longer applies to this project. Cowork owns
+`prompts/` and `register.md`; Claude Code owns `reports/`. A pre-commit hook rejects any file under
+`claude_work/` in this repo, so the old layout cannot creep back.
+
+Where the generated command file `.claude/commands/project-round-close.md` names `claude_work/…` paths,
+**this contract overrides them** until notso-prompt regenerates it from a skill that reads paths from the
+round contract (R-032 F2). That file is not hand-edited here.
 
 🚨 **This project does not edit the round skill. Marc's rule, 2026-09-14.** The **notso-prompt** project
 owns `~/notso_prompt/skill/SKILL.md` as the single source of truth. Any change this project wants to the
@@ -96,8 +105,9 @@ is present, and answers a different question than the one asked (notso-prompt, 2
 
 **Project-specific traps a round skill must honor here:**
 
-- A prompt is not available until it is **committed** — check `git ls-files`, not `ls`. Worktrees see
-  only committed state (R-022).
+- ~~A prompt is not available until it is committed~~ — **retired by R-032.** Prompts live in the PM
+  folder and are read by absolute path from every checkout, so there is no committed-vs-working-tree gap
+  (the failure was R-022).
 - Never run plain `git status` against the mounted repo from Cowork; it leaves a `.git/index.lock` the
   mount cannot remove, blocking Marc's next commit. Use `git --no-optional-locks`.
 - Other repos on this machine also use "round", `claude_work/`, prompts and registers. Never answer
@@ -112,7 +122,7 @@ is present, and answers a different question than the one asked (notso-prompt, 2
 
 1. Marc makes a request in **Cowork**. Cowork assigns an R-number immediately and writes it to the
    register — before any round starts.
-2. Cowork writes a prompt file to `claude_work/prompts/spot-<session>-R-###.md`.
+2. Cowork writes a prompt file to `~/projects/ai_orchestrator_claude/spotify-pm/prompts/spot-<session>-R-###.md`.
 3. Marc pastes the **handoff cell** into the Claude Code session the id names. The cell is the slash
    command and the round id, nothing else:
 
@@ -166,17 +176,17 @@ is present, and answers a different question than the one asked (notso-prompt, 2
    **If a session replies without having opened the round, that is a failed handoff — start a fresh
    session rather than rephrasing at it** (R-021).
 
-   🚨 **A prompt file is not handed off until it is committed and pushed.** A worktree sees only
-   committed state. Cowork handing over a path that exists solely in `main`'s working tree is a handoff
-   to a file the session cannot open, and it will fail every time, correctly. **Commit, then hand off.**
-   Three consecutive rounds were lost to this (R-022).
+   ~~A prompt file is not handed off until it is committed and pushed.~~ **Retired by R-032.** The rule
+   existed because prompts lived inside this repo, where a worktree sees only committed state — three
+   consecutive rounds were lost to it (R-022). Prompts now live in the PM folder, outside every checkout,
+   and are read by absolute path, committed or not.
 
    **Small rounds skip the file entirely.** If the instruction fits in a paste, put it in the paste —
    self-contained, no path, no dependency on repo state. The file-based prompt exists for rounds too
    large to paste, not as a ceremony. A one-command change handed over as a file reference is pure
    overhead, and it is overhead that has now failed more often than it has worked.
 4. Claude Code executes, and ends by writing a build report to
-   `claude_work/reports/spot-<session>-R-###-report.md`.
+   `~/projects/ai_orchestrator_claude/spotify-pm/reports/spot-<session>-R-###-report.md`.
 5. Cowork reads the **repository**, not the report, to move the register row.
 
 **R-number format: `spot-<session>-R-###`** — e.g. `spot-main-R-007`, `spot-wta-R-042`. The session
@@ -395,7 +405,7 @@ A round is not complete until all of these are true:
 - **A guard was proven to fail.** Every round that adds a test or constraint stages a break, records
   which named test went red, and reverts. "The tests pass" is not evidence; "test_play_event_grain
   failed with N duplicate keys when I removed the dedupe" is.
-- A build report exists at `claude_work/reports/spot-<session>-R-###-report.md` naming: files
+- A build report exists at `~/projects/ai_orchestrator_claude/spotify-pm/reports/spot-<session>-R-###-report.md` naming: files
   changed, contracts touched, the red-test evidence above, and anything the contract got wrong.
 
 ---

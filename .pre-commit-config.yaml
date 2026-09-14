@@ -20,6 +20,11 @@ repos:
         entry: "Files under data/, published/ and reports/ are personal data and must never be committed (CLAUDE.md §5)."
         language: fail
         files: ^(data|published|reports)/
+      - id: spot-no-pm-files-in-code-repo
+        name: spot — reject claude_work/ (PM files live in ../spotify-pm)
+        entry: "Prompts, reports and the register live in ~/projects/ai_orchestrator_claude/spotify-pm, outside this repo (R-032). Do not recreate claude_work/ here."
+        language: fail
+        files: ^claude_work/
 
   - repo: https://github.com/kynan/nbstripout
     rev: 0.9.1
