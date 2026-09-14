@@ -49,6 +49,19 @@ cd ../spotify-wta && make bootstrap     # same credentials, same database, no ot
 | `uv run spot migrate` / `make migrate` | Apply raw migrations; create this session's schemas |
 | `make dbt-parse` | `dbt parse` with `SPOT_SESSION` from `.session` |
 | `make test`, `make lint` | pytest; ruff check + format check |
+| `make report-01` | Execute `notebooks/01_api_inventory.ipynb`, render it to `reports/01_api_inventory.html`, strip its outputs again |
+
+## Notebooks and reports
+
+Notebooks open with `ctx = setup(profile="marc")` from `spotify_lakehouse.notebook`. It holds the connection,
+so no notebook contains a connection string or a credential. Rendered HTML goes to `reports/`, which is
+gitignored; notebooks are committed with outputs stripped (nbstripout).
+
+Rendering uses **nb2report** from a **local checkout**, expected beside this repo at `../nb2report`
+(override with `make report-01 NB2REPORT=/path/to/nb2report`). It is attached per run with
+`uv run --with-editable`, **not** recorded in `pyproject.toml` or `uv.lock`: a path dependency in the lock
+makes `uv sync --locked` fail for anyone without that directory, CI included. nb2report's remote is not
+assumed to be public, so it is not referenced by git URL either.
 
 ## dbt conventions
 

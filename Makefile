@@ -3,7 +3,7 @@ CONFIG_DIR ?= $(HOME)/.config/spot
 COMPOSE := docker compose --env-file $(CONFIG_DIR)/.env
 
 .PHONY: help bootstrap db-up db-down migrate dbt-parse dbt-build dbt-test dbt-profile test lint format \
-	launchd-install launchd-uninstall refresh-status
+	launchd-install launchd-uninstall refresh-status report-01
 
 help:
 	@echo "bootstrap    one command to make this checkout fully operational (idempotent)"
@@ -44,6 +44,18 @@ launchd-uninstall:
 
 refresh-status:
 	uv run spot refresh --status
+
+# nb2report is attached per run from a local checkout, never recorded in uv.lock: a path dependency
+# in the lock breaks `uv sync --locked` for anyone without that sibling directory, CI included (R-008).
+NB2REPORT ?= ../nb2report
+report-01:
+	uv run jupyter nbconvert --to notebook --execute --inplace \
+		--ExecutePreprocessor.timeout=600 notebooks/01_api_inventory.ipynb
+	mkdir -p reports
+	uv run --with-editable $(NB2REPORT) nb2report notebooks/01_api_inventory.ipynb \
+		--author "Marc Alexander" --toc-depth 3 -o reports/01_api_inventory.html
+	uv run nbstripout notebooks/01_api_inventory.ipynb
+	@echo "Report: reports/01_api_inventory.html (notebook outputs stripped again)"
 
 dbt-profile:
 	scripts/install_dbt_profile.sh
