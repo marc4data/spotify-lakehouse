@@ -1,0 +1,8 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: One row per calendar day from Spotify's launch, plus the -1 unknown member.
+    columns:
+      - name: date_key
+        tests: [unique, not_null]

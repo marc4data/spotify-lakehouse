@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: int_play_events__deduped
+    description: >
+      One row per natural key (profile, content_uri, minute of ended_at_utc), export preferred over api
+      (data-contracts §2).
+    tests:
+      - dbt_utils_free_unique_combination:
+          arguments:
+            columns: [profile_slug, content_uri, "date_trunc('minute', ended_at_utc)"]
+
+unit_tests:
+  - name: dedupe_collapses_same_minute_and_prefers_export
+    description: >
+      Fixed fixture, independent of what raw contains (R-004 report §4). Removing the minute truncation
+      turns this red: the two distinct t1 plays at 12:00:10 and 12:00:40 would both survive, and so would
+      both t3 rows.
+    model: int_play_events__deduped
+    given:
+      - input: ref('int_play_events__unioned')
+        rows:
+          # t1, 12:00 minute: first capture, an exact re-capture, and a distinct play 30 s later
+          - {profile_slug: alpha, content_uri: "spotify:track:t1", ended_at_utc: "2026-01-01 12:00:10+00", source_system: api, ingested_at: "2026-01-02 00:00:00+00", raw_response_id: 1, item_ordinal: 1}
+          - {profile_slug: alpha, content_uri: "spotify:track:t1", ended_at_utc: "2026-01-01 12:00:10+00", source_system: api, ingested_at: "2026-01-03 00:00:00+00", raw_response_id: 2, item_ordinal: 1}
+          - {profile_slug: alpha, content_uri: "spotify:track:t1", ended_at_utc: "2026-01-01 12:00:40+00", source_system: api, ingested_at: "2026-01-02 00:00:00+00", raw_response_id: 3, item_ordinal: 2}
+          # a different track in the same minute is a different key
+          - {profile_slug: alpha, content_uri: "spotify:track:t2", ended_at_utc: "2026-01-01 12:00:40+00", source_system: api, ingested_at: "2026-01-02 00:00:00+00", raw_response_id: 4, item_ordinal: 3}
+          # the same track in the next minute is a different key
+          - {profile_slug: alpha, content_uri: "spotify:track:t1", ended_at_utc: "2026-01-01 12:01:05+00", source_system: api, ingested_at: "2026-01-02 00:00:00+00", raw_response_id: 5, item_ordinal: 4}
+          # t3: api row ingested first, export row later in the same minute: export must still win
+          - {profile_slug: alpha, content_uri: "spotify:track:t3", ended_at_utc: "2026-01-01 12:05:59+00", source_system: api, ingested_at: "2026-01-01 00:00:00+00", raw_response_id: 6, item_ordinal: 5}
+          - {profile_slug: alpha, content_uri: "spotify:track:t3", ended_at_utc: "2026-01-01 12:05:30+00", source_system: export, ingested_at: "2026-01-09 00:00:00+00", raw_response_id: 7, item_ordinal: 1}
+    expect:
+      rows:
+        - {profile_slug: alpha, content_uri: "spotify:track:t1", ended_at_utc: "2026-01-01 12:00:10+00", source_system: api, raw_response_id: 1}
+        - {profile_slug: alpha, content_uri: "spotify:track:t2", ended_at_utc: "2026-01-01 12:00:40+00", source_system: api, raw_response_id: 4}
+        - {profile_slug: alpha, content_uri: "spotify:track:t1", ended_at_utc: "2026-01-01 12:01:05+00", source_system: api, raw_response_id: 5}
+        - {profile_slug: alpha, content_uri: "spotify:track:t3", ended_at_utc: "2026-01-01 12:05:30+00", source_system: export, raw_response_id: 7}

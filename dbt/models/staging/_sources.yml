@@ -1,0 +1,32 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    description: Extractor output. Append-only; never modified after insert (data-contracts §1).
+    tables:
+      - name: api_response
+        description: One row per Spotify Web API response, as received minus contract-discarded fields.
+        columns:
+          - name: id
+            tests: [unique, not_null]
+          - name: feed
+            tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [me, recently_played, artist]
+          - name: profile_slug
+            tests: [not_null]
+
+  - name: spot_meta
+    schema: spot_meta
+    description: Project bookkeeping loaded by the CLI, not by the extractor.
+    tables:
+      - name: profile_registry
+        description: >
+          Household role and home timezone per profile, synced from ~/.config/spot/profiles.csv by
+          `spot sync-profiles`. Never stored in the repo.
+        columns:
+          - name: profile_slug
+            tests: [unique, not_null]

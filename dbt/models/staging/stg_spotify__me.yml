@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: stg_spotify__me
+    description: One row per GET /me response. account_id and email are never selected.
+    columns:
+      - name: raw_response_id
+        tests: [unique, not_null]
+      - name: profile_slug
+        tests: [not_null]
+      - name: spotify_user_id
+        tests: [not_null]

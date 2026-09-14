@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: int_play_events__unioned
+    description: All play-event candidates from all sources, not yet deduplicated.
+    columns:
+      - name: source_system
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [api, export]
+      - name: ms_played
+        description: NULL for every API row, by contract (data-contracts §2, the ms_played hole).

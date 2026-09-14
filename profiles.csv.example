@@ -1,0 +1,9 @@
+# spotify-lakehouse profile registry — TEMPLATE ONLY.
+# The real file is ~/.config/spot/profiles.csv (chmod 600), outside the repo. `make bootstrap` creates it
+# from this template. Roles and home timezones of family members are personal data: never commit them.
+#
+# One data row per profile, below the header:
+#   profile_slug    lowercase handle the CLI and notebooks use (e.g. the one given to `spot auth`)
+#   household_role  self | spouse | child | friend
+#   home_timezone   IANA zone name, e.g. America/New_York — drives every local date and time of day
+profile_slug,household_role,home_timezone

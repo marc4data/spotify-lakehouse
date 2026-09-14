@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: dim_artist
+    description: One row per artist, plus the -1 unknown member. SCD Type 1 until R-024.
+    columns:
+      - name: artist_key
+        tests: [unique, not_null]
+      - name: artist_id
+        tests: [unique, not_null]

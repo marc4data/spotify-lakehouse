@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: int_content_artists
+    description: One row per (track, credited artist), with the primary artist flagged.
+    tests:
+      - dbt_utils_free_unique_combination:
+          arguments:
+            columns: [content_uri, artist_id]
+    columns:
+      - name: content_uri
+        tests: [not_null]
+      - name: artist_id
+        tests: [not_null]

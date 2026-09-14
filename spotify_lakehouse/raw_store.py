@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -13,9 +14,18 @@ from psycopg.types.json import Jsonb
 
 from spotify_lakehouse.config import ConfigError, repo_root
 
-# Fields discarded before anything is persisted. data-contracts §3: "email is never stored.
-# The extractor reads it from /me to match accounts and discards it."
+# Fields discarded before anything is persisted. data-contracts §3: email never reaches the
+# extractor; the scrub stays as a backstop.
 DISCARDED_FIELDS: dict[str, tuple[str, ...]] = {"/me": ("email",)}
+
+# data-contracts §1: one raw table, one `feed` value per endpoint. Staging builds one view per feed.
+FEEDS_BY_ENDPOINT: dict[str, str] = {
+    "/me": "me",
+    "/me/player/recently-played": "recently_played",
+}
+ARTIST_ENDPOINT = re.compile(r"/artists/[A-Za-z0-9]+")
+FEED_NAME = re.compile(r"[a-z][a-z0-9_]*")
+FILE_KEY = re.compile(r"[A-Za-z0-9]+")
 
 
 def raw_dir() -> Path:
@@ -28,6 +38,15 @@ def raw_dir() -> Path:
     return path
 
 
+def feed_for_endpoint(endpoint: str) -> str:
+    """The raw.api_response `feed` for an API path. An unknown endpoint is an error, not a guess."""
+    if endpoint in FEEDS_BY_ENDPOINT:
+        return FEEDS_BY_ENDPOINT[endpoint]
+    if ARTIST_ENDPOINT.fullmatch(endpoint):
+        return "artist"
+    raise ValueError(f"No feed is defined for {endpoint!r}; add it to raw_store.FEEDS_BY_ENDPOINT.")
+
+
 def scrub(endpoint: str, payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """Return a copy of `payload` without discarded fields, plus the names that were removed."""
     clean = copy.deepcopy(payload)
@@ -38,11 +57,24 @@ def scrub(endpoint: str, payload: dict[str, Any]) -> tuple[dict[str, Any], list[
 
 
 def write_response(
-    profile: str, endpoint: str, payload: dict[str, Any], run_id: str, fetched_at: datetime
+    profile: str,
+    feed: str,
+    payload: dict[str, Any],
+    run_id: str,
+    fetched_at: datetime,
+    key: str | None = None,
 ) -> str:
-    """Write one response file and return its path relative to data/raw (the `source_file`)."""
-    feed = endpoint.strip("/").replace("/", "_")
-    relative = Path("api") / feed / profile / f"{fetched_at:%Y%m%dT%H%M%SZ}_{run_id}.json"
+    """Write one response file and return its path relative to data/raw (the `source_file`).
+
+    `key` distinguishes several responses of one feed in one run (e.g. one file per artist id).
+    """
+    if not FEED_NAME.fullmatch(feed):
+        raise ValueError(f"Invalid feed name {feed!r}")
+    if key is not None and not FILE_KEY.fullmatch(key):
+        raise ValueError(f"Invalid file key {key!r}: letters and digits only")
+    suffix = f"_{key}" if key else ""
+    name = f"{fetched_at:%Y%m%dT%H%M%SZ}_{run_id}{suffix}.json"
+    relative = Path("api") / feed / profile / name
     target = raw_dir() / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("x") as fh:  # "x": never overwrite an existing raw file
@@ -52,12 +84,16 @@ def write_response(
 
 
 def insert_response(
-    conn: psycopg.Connection, payload: dict[str, Any], source_file: str, profile: str
+    conn: psycopg.Connection,
+    payload: dict[str, Any],
+    source_file: str,
+    profile: str,
+    feed: str,
 ) -> int:
     row = conn.execute(
-        "insert into raw.api_response (payload, source_file, profile_key) "
-        "values (%s, %s, %s) returning id",
-        (Jsonb(payload), source_file, profile),
+        "insert into raw.api_response (feed, payload, source_file, profile_slug) "
+        "values (%s, %s, %s, %s) returning id",
+        (feed, Jsonb(payload), source_file, profile),
     ).fetchone()
     assert row is not None
     return int(row[0])

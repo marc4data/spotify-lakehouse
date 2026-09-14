@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: dim_time_of_day
+    description: One row per minute of the day, plus the -1 unknown member.
+    columns:
+      - name: time_of_day_key
+        tests: [unique, not_null]
+      - name: daypart
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [overnight, morning, midday, afternoon, evening, night, unknown]

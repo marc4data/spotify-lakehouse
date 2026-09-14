@@ -1,0 +1,8 @@
+version: 2
+
+models:
+  - name: int_artists__latest
+    description: One row per artist id referenced or fetched.
+    columns:
+      - name: artist_id
+        tests: [unique, not_null]

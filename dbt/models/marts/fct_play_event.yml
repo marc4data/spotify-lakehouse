@@ -1,0 +1,52 @@
+version: 2
+
+models:
+  - name: fct_play_event
+    description: >
+      One row per completed play event, per profile (data-contracts §2). API rows carry NULL ms_played
+      and NULL export-only columns by contract. Grain and orphan tests live in dbt/tests/.
+    columns:
+      - name: play_event_key
+        tests: [unique, not_null]
+      - name: profile_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_profile')
+                field: profile_key
+      - name: content_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_content')
+                field: content_key
+      - name: date_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: time_of_day_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_time_of_day')
+                field: time_of_day_key
+      - name: ended_at_utc
+        tests: [not_null]
+      - name: is_ms_played_imputed
+        tests:
+          - accepted_values:
+              arguments:
+                values: [false]
+                quote: false
+      - name: source_system
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [api, export]

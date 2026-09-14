@@ -1,0 +1,23 @@
+version: 2
+
+models:
+  - name: stg_spotify__recently_played
+    description: >
+      One row per recently-played item, per raw response. Not deduplicated: the same play captured by
+      two polls appears twice here, by design (deduplication is intermediate's job, data-contracts §1).
+    columns:
+      - name: raw_response_id
+        tests: [not_null]
+      - name: played_at_utc
+        tests: [not_null]
+      - name: content_uri
+        tests: [not_null]
+      - name: content_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: [track, episode]
+    tests:
+      - dbt_utils_free_unique_combination:
+          arguments:
+            columns: [raw_response_id, item_ordinal]

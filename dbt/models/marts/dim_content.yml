@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: dim_content
+    description: Tracks and episodes in one supertype dimension, plus unknown members -1 (absent) and -2 (pending).
+    columns:
+      - name: content_key
+        tests: [unique, not_null]
+      - name: content_uri
+        tests: [unique, not_null]
+      - name: content_type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [track, episode, unknown]
+      - name: is_resolved
+        tests: [not_null]

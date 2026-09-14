@@ -32,6 +32,10 @@ def test_gap_rejected(tmp_path: Path) -> None:
 # --- Integration: runs only when the shared Postgres is reachable. Leaves nothing behind. --------
 
 
+class _Rollback(Exception):
+    pass
+
+
 @pytest.fixture
 def conn():
     psycopg = pytest.importorskip("psycopg")
@@ -47,37 +51,79 @@ def conn():
         )
     except (ConfigError, psycopg.OperationalError) as exc:
         pytest.skip(f"database not available: {exc.__class__.__name__}")
+    migrate.apply(connection, REAL_MIGRATIONS)
     yield connection
     connection.close()
 
 
+def _in_rolled_back_transaction(conn, work) -> None:
+    try:
+        with conn.transaction():
+            work()
+            raise _Rollback
+    except _Rollback:
+        pass
+
+
 def test_migrate_is_idempotent(conn) -> None:
-    migrate.apply(conn, REAL_MIGRATIONS)
     assert migrate.apply(conn, REAL_MIGRATIONS) == []
 
 
 def test_raw_api_response_is_append_only(conn) -> None:
     import psycopg
 
-    migrate.apply(conn, REAL_MIGRATIONS)
     marker = f"pytest-{uuid.uuid4().hex[:8]}"
-    try:
-        with conn.transaction():
-            row = conn.execute(
-                "insert into raw.api_response (payload, source_file, profile_key) "
-                "values ('{}'::jsonb, %s, 'pytest') returning id",
-                (marker,),
-            ).fetchone()
-            with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
-                conn.execute("update raw.api_response set profile_key = 'x' where id = %s", row)
-            raise _Rollback
-    except _Rollback:
-        pass
+
+    def work() -> None:
+        row = conn.execute(
+            "insert into raw.api_response (feed, payload, source_file, profile_slug) "
+            "values ('pytest', '{}'::jsonb, %s, 'pytest') returning id",
+            (marker,),
+        ).fetchone()
+        with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
+            conn.execute("update raw.api_response set profile_slug = 'x' where id = %s", row)
+
+    _in_rolled_back_transaction(conn, work)
     left = conn.execute(
         "select count(*) from raw.api_response where source_file = %s", (marker,)
     ).fetchone()
     assert left == (0,)
 
 
-class _Rollback(Exception):
-    pass
+def test_raw_api_response_requires_feed(conn) -> None:
+    import psycopg
+
+    def work() -> None:
+        with pytest.raises(psycopg.errors.NotNullViolation):
+            conn.execute(
+                "insert into raw.api_response (payload, source_file, profile_slug) "
+                "values ('{}'::jsonb, 'pytest', 'pytest')"
+            )
+
+    _in_rolled_back_transaction(conn, work)
+
+
+def test_raw_api_response_feed_format_is_checked(conn) -> None:
+    import psycopg
+
+    def work() -> None:
+        with pytest.raises(psycopg.errors.CheckViolation, match="api_response_feed_format"):
+            conn.execute(
+                "insert into raw.api_response (feed, payload, source_file, profile_slug) "
+                "values ('Recently-Played', '{}'::jsonb, 'pytest', 'pytest')"
+            )
+
+    _in_rolled_back_transaction(conn, work)
+
+
+def test_profile_registry_rejects_unknown_role(conn) -> None:
+    import psycopg
+
+    def work() -> None:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "insert into spot_meta.profile_registry "
+                "(profile_slug, household_role, home_timezone) values ('pytest', 'parent', 'UTC')"
+            )
+
+    _in_rolled_back_transaction(conn, work)

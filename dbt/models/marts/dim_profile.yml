@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: dim_profile
+    description: One row per person whose data is in the warehouse, plus the -1 unknown member.
+    columns:
+      - name: profile_key
+        tests: [unique, not_null]
+      - name: profile_slug
+        tests: [unique, not_null]

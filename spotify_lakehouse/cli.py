@@ -1,4 +1,4 @@
-"""`spot` command line: auth, probe, migrate."""
+"""`spot` command line: auth, probe, extract-artists, sync-profiles, migrate."""
 
 from __future__ import annotations
 
@@ -12,11 +12,12 @@ from typing import Any
 
 import structlog
 
-from spotify_lakehouse import auth, migrate
+from spotify_lakehouse import auth, migrate, profiles
 from spotify_lakehouse.api import SpotifyApiError, SpotifyClient
+from spotify_lakehouse.artists import artist_ids_to_fetch
 from spotify_lakehouse.config import ConfigError, load_settings, session
 from spotify_lakehouse.db import connect, refresh_lock
-from spotify_lakehouse.raw_store import insert_response, scrub, write_response
+from spotify_lakehouse.raw_store import feed_for_endpoint, insert_response, scrub, write_response
 from spotify_lakehouse.shape import describe_shape
 
 PROBE_ENDPOINTS: tuple[tuple[str, dict[str, Any] | None], ...] = (
@@ -48,6 +49,14 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         schemas = migrate.ensure_session_schemas(conn, session_name)
     print(f"migrations applied: {', '.join(applied) if applied else 'none pending'}")
     print(f"session schemas present: {', '.join(schemas)}")
+    return 0
+
+
+def cmd_sync_profiles(args: argparse.Namespace) -> int:
+    entries = profiles.load_registry()
+    with connect() as conn:
+        count = profiles.sync_registry(conn, entries)
+    print(f"profile registry synced: {count} profile(s) from {profiles.registry_path()}")
     return 0
 
 
@@ -90,13 +99,14 @@ def cmd_probe(args: argparse.Namespace) -> int:
         SpotifyClient.for_profile(profile, settings) as api,
     ):
         for endpoint, params in PROBE_ENDPOINTS:
+            feed = feed_for_endpoint(endpoint)
             payload = api.get(endpoint, params)
             shape = describe_shape(payload)
             clean, removed = scrub(endpoint, payload)
             del payload  # nothing below may touch the unscrubbed response
-            source_file = write_response(profile, endpoint, clean, run_id, datetime.now(UTC))
-            row_id = insert_response(conn, clean, source_file, profile)
-            lines.append(f"\nGET {endpoint}")
+            source_file = write_response(profile, feed, clean, run_id, datetime.now(UTC))
+            row_id = insert_response(conn, clean, source_file, profile, feed)
+            lines.append(f"\nGET {endpoint}  (feed={feed})")
             lines.append(f"  data/raw/{source_file}")
             lines.append(f"  raw.api_response.id = {row_id}")
             if endpoint == "/me":
@@ -107,6 +117,38 @@ def cmd_probe(args: argparse.Namespace) -> int:
                 lines.append("  shape (as received, types only):")
                 lines.extend(f"    {path}: {types}" for path, types in shape.items())
     print("\n".join(lines))
+    return 0
+
+
+def cmd_extract_artists(args: argparse.Namespace) -> int:
+    profile = auth.validate_slug(args.profile)
+    settings = load_settings()
+    run_id = f"artists-{session()}-{uuid.uuid4().hex[:8]}"
+    stored = 0
+    with_genres_key = 0
+    with (
+        connect(settings, autocommit=True) as conn,
+        refresh_lock(conn),
+        SpotifyClient.for_profile(profile, settings) as api,
+    ):
+        artist_ids = artist_ids_to_fetch(conn, refresh=args.refresh)
+        print(
+            f"spot extract-artists  profile={profile}  run_id={run_id}  to fetch: {len(artist_ids)}"
+        )
+        for artist_id in artist_ids:
+            endpoint = f"/artists/{artist_id}"
+            feed = feed_for_endpoint(endpoint)
+            payload = api.get(endpoint)
+            clean, _ = scrub(endpoint, payload)
+            source_file = write_response(
+                profile, feed, clean, run_id, datetime.now(UTC), key=artist_id
+            )
+            insert_response(conn, clean, source_file, profile, feed)
+            stored += 1
+            with_genres_key += "genres" in clean
+    print(
+        f"stored {stored} artist response(s) as feed=artist; with a 'genres' key: {with_genres_key}"
+    )
     return 0
 
 
@@ -123,6 +165,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe.add_argument("--profile", required=True, help="profile slug, e.g. marc")
     p_probe.add_argument("--shape", action="store_true", help="print key paths and types")
     p_probe.set_defaults(func=cmd_probe)
+
+    p_artists = sub.add_parser(
+        "extract-artists", help="GET /artists/{id} for every artist credited in recently-played"
+    )
+    p_artists.add_argument("--profile", required=True, help="profile whose token makes the calls")
+    p_artists.add_argument(
+        "--refresh", action="store_true", help="re-observe artists that already have a response"
+    )
+    p_artists.set_defaults(func=cmd_extract_artists)
+
+    p_profiles = sub.add_parser(
+        "sync-profiles", help="load ~/.config/spot/profiles.csv into spot_meta.profile_registry"
+    )
+    p_profiles.set_defaults(func=cmd_sync_profiles)
 
     p_migrate = sub.add_parser("migrate", help="apply raw migrations and create session schemas")
     p_migrate.set_defaults(func=cmd_migrate)

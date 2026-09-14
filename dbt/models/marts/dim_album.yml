@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: dim_album
+    description: One row per album, plus the -1 unknown member.
+    columns:
+      - name: album_key
+        tests: [unique, not_null]
+      - name: album_id
+        tests: [unique, not_null]
+      - name: release_date_precision
+        tests:
+          - accepted_values:
+              arguments:
+                values: [day, month, year]

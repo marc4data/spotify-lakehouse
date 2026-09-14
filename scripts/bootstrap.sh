@@ -170,6 +170,25 @@ else
   printf '    skipped: database not available\n'
 fi
 
+# --- 7b. Profile registry (outside the repo) ----------------------------------------------------
+step "Profile registry ($CONFIG_DIR/profiles.csv)"
+if [[ ! -f "$CONFIG_DIR/profiles.csv" ]]; then
+  (umask 077 && cp profiles.csv.example "$CONFIG_DIR/profiles.csv")
+  printf '    created %s from profiles.csv.example (chmod 600)\n' "$CONFIG_DIR/profiles.csv"
+fi
+chmod 600 "$CONFIG_DIR/profiles.csv"
+if ((DB_UP)); then
+  if sync_out="$(uv run --quiet spot sync-profiles 2>&1)"; then
+    ok "$sync_out"
+  else
+    record profiles-invalid \
+      "$sync_out" \
+      "Fix: edit $CONFIG_DIR/profiles.csv — one row per profile: profile_slug,household_role,home_timezone"
+  fi
+else
+  printf '    skipped sync: database not available\n'
+fi
+
 # --- 8. Pre-commit hooks -----------------------------------------------------------------------
 step "pre-commit hooks"
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

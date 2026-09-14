@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: stg_spotify__artist
+    description: One row per GET /artists/{id} response (feed = artist).
+    columns:
+      - name: raw_response_id
+        tests: [unique, not_null]
+      - name: artist_id
+        tests: [not_null]

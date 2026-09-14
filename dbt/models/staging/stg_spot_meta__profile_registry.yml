@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: stg_spot_meta__profile_registry
+    description: Profile registry, as synced by `spot sync-profiles`.
+    columns:
+      - name: profile_slug
+        tests: [unique, not_null]
+      - name: household_role
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [self, spouse, child, friend]
+      - name: home_timezone
+        tests: [not_null]

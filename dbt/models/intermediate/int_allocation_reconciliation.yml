@@ -1,0 +1,17 @@
+version: 2
+
+models:
+  - name: int_allocation_reconciliation
+    description: >
+      total listening -> music -> artist-resolved -> genre-allocated, one row per (profile, step), each
+      step naming its residual (data-contracts §4). R-009 prints this. Ends at artist-resolved until R-024.
+    tests:
+      - dbt_utils_free_unique_combination:
+          arguments:
+            columns: [profile_slug, step_number]
+    columns:
+      - name: step_name
+        tests:
+          - accepted_values:
+              arguments:
+                values: [total_listening, music, artist_resolved, genre_allocated]

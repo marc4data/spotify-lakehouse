@@ -1,0 +1,8 @@
+version: 2
+
+models:
+  - name: int_albums__latest
+    description: One row per album id, latest observed attributes.
+    columns:
+      - name: album_id
+        tests: [unique, not_null]

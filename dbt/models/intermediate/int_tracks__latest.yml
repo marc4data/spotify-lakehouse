@@ -1,0 +1,8 @@
+version: 2
+
+models:
+  - name: int_tracks__latest
+    description: One row per track URI, latest observed attributes.
+    columns:
+      - name: content_uri
+        tests: [unique, not_null]

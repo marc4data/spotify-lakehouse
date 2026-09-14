@@ -1,0 +1,21 @@
+version: 2
+
+models:
+  - name: dim_track_detail
+    description: Track-specific attributes, one row per track content_key.
+    columns:
+      - name: content_key
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_content')
+                field: content_key
+      - name: album_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_album')
+                field: album_key
