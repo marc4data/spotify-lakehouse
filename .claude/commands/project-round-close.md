@@ -1,18 +1,29 @@
 ---
-description: Run a spotify-lakehouse round by its id (spot-main-R-004, or short R-004).
-argument-hint: R-###
+description: Run a spotify-lakehouse round by its id, e.g. spot-main-R-004.
+argument-hint: <abbr>-<session>-R-###
 ---
+
+<!--
+  GENERATED ARTIFACT — do not hand-edit the shared rules below.
+
+  Generated from ~/notso_prompt/skill/SKILL.md
+  sha256 abb62e40fea5ba782b460a24433084b45d06d932dfebedf9034c2583e44dee11 · 2026-09-14
+
+  Carries the EXECUTE half only; Cowork reads the close half from the account skill.
+  Check currency from this repo:  shasum -a 256 ~/notso_prompt/skill/SKILL.md
+  Match means current. Mismatch means ask notso-prompt for the delta and regenerate —
+  never hand-edit, which is the second-copy drift this split exists to avoid.
+-->
 
 Run round **$ARGUMENTS** in this repository.
 
-You are the **Claude Code** half of the round workflow. Cowork reviews and closes; you execute. This
-file exists because the account-level `project-round-close` skill resolves in Cowork but not in Claude
-Code — it carries only the execute half, so there is no second copy of the close format to drift.
+You are the **Claude Code** half of the round workflow. Cowork reviews and closes; you execute.
 
 ## 1. Read the round contract
 
 `CLAUDE.md` §2 declares this project's abbr, sessions, register path, id shape and repo root, plus its
-traps. Read it. If §2 is missing, stop and say which facts are absent — do not invent them.
+traps. Read it. If §2 is missing a fact, stop and name what is absent — do not invent it and do not guess
+from a neighbouring project.
 
 ## 2. Resolve the id
 
@@ -50,17 +61,30 @@ project and the finding was worth more than the workaround would have been.
 Meet `CLAUDE.md` §7 in full, including **staging a break and naming the test that went red.** "All tests
 pass" is not evidence a guard works; a guard nobody has watched fail is not a control.
 
-## 5. Report
+Three checks this project has paid for, in the four rules:
+
+- **A measurement is reproducible; a diagnosis is an inference from one.** Record a causal claim as this
+  round's finding, attributed, not as a premise. **Documentation is not a measurement either** — a
+  reference page says what the vendor wrote, not what the system returns today.
+- **One tool's refusal is not a capability claim.** Name the tool and the exact error, say what was not
+  tried, and try the other tool before writing the limit down.
+- **A column that exists is not a column that has data.** Answer with a query: how many rows carry it,
+  what populates it, and when did that last run.
+
+## 5. Report, then hand yourself back
 
 Write `claude_work/reports/<full-id>-report.md`. Name the files changed, the red-test transcript, the
 measurements the prompt asked for, and anything the Cowork prompt got wrong.
 
-🚨 **End your reply with the return handoff cell, in a fenced block Marc can copy without editing** — the
-same command, with the same **full** id, which Cowork will read as "review this round's report":
+🚨 **End your reply with the return handoff cell** — a fenced block Marc can copy without editing,
+carrying the same command and the same **full** id, which Cowork reads as "review this round's report":
 
     /project-round-close <abbr>-<session>-R-###
 
-**A round that does not hand itself back is not finished.** Do not make Marc compose the handoff.
+**A round that does not hand itself back is not finished.** Leaving Marc to compose the handoff is the
+same failure as leaving him to compose a git command: it is work the round should have done. **Every
+command you hand him names the window it runs in**, and no fenced block meant for a terminal contains a
+blank line.
 
 Then the measured clock line, last:
 

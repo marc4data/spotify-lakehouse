@@ -123,9 +123,9 @@ who contributes only an export file, with no API access, still gets a profile.
 | `spotify_user_id` | NULL for export-only contributors. |
 | `household_role` | `self`, `spouse`, `child`, `friend`. |
 | `home_timezone` | IANA name. Drives every local-date conversion. |
-| `has_api_access` | Whether they occupy one of the 5 dev-mode slots. |
+| `has_api_access` | Whether they occupy one of the 5 dev-mode slots. **Derived, until R-017 exists, as "a `/me` response exists for this profile"** (C4, R-004) — the closest observable proxy. Redefine when the poller lands. |
 | `export_coverage_start` / `_end` | Observed min/max `ts` in their export. **Derived, not declared** — every longitudinal comparison must clip to the intersection of coverage windows or it will show a family member "stopping listening" when their export simply ends. |
-| `api_coverage_start` | First poller row. |
+| `api_coverage_start` | First poller row. **Until R-017 exists, the first `recently_played` ingestion** (C4, R-004). |
 
 **`email` never reaches the extractor.** The `user-read-email` scope is never requested, so Spotify does not
 return it, and accounts are matched on `spotify_user_id` instead — `spot auth` refuses to bind one Spotify id
@@ -174,6 +174,12 @@ direct cast will fail.
 
 Standard Kimball unknown members: `content_key = -1` for genuinely absent, `-2` for
 not-yet-resolved-but-pending.
+
+**Unknown-member attribute values are part of the domain, not an exception to it (C3, R-004).** Enumerate
+them in the accepted-values tests rather than letting a row carry a value the contract forbids:
+`dim_content.content_type` ∈ {`track`, `episode`, `unknown`}; `dim_profile.profile_slug` unknown member is
+`(unknown)`; `dim_time_of_day.daypart` gains `unknown`. A dimension whose unknown row violates its own
+enumeration is a contract that cannot pass its own test.
 
 ### `dim_artist` — SCD Type 1
 
@@ -338,6 +344,6 @@ reporting session, correctly — the date was right in UTC.
 |---|---|---|
 | `spot-main-R-015` | Genre bucket list (§3) | **Marc's sign-off.** Everything else can be built around it; the seed file is the last thing to fill. |
 | `spot-main-R-016` | Do added dev-mode users need Premium? | Empirical test at family onboarding. The owner account is confirmed `product: premium`; the added-user case is untested. |
-| `spot-main-R-018` | Does `recently-played` page backwards via `next`? | **One API call, and it gates R-017.** The probe returned a non-null `next` with a `before=` cursor. If following it yields plays older than the first 50, `CLAUDE.md` §4 is wrong and the poller design changes. |
+| ~~`spot-main-R-018`~~ | ~~Does `recently-played` page backwards via `next`?~~ | **SETTLED 2026-09-14: no.** Following `next` once returned 0 items and `next = null`, with 14 older plays demonstrably available from the same endpoint a day earlier. R-017's poller is a catcher, not a backfiller. See `CLAUDE.md` §4. |
 | — | MusicBrainz genre fallback | Phase 2. Contract written when Spotify actually removes `genres`, not before. |
 | — | Feature-artist credit splitting | Phase 2. A change to `weight_factor`, not to the model. Currently mis-attributing ~26% of tracks (§4). |

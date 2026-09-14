@@ -75,6 +75,25 @@ and a second copy is a copy that drifts.
 Prompts and reports live beside the register, at `claude_work/prompts/<id>.md` and
 `claude_work/reports/<id>-report.md`.
 
+🚨 **This project does not edit the round skill. Marc's rule, 2026-09-14.** The **notso-prompt** project
+owns `~/notso_prompt/skill/SKILL.md` as the single source of truth. Any change this project wants to the
+shared workflow — a new trap, a corrected rule, a wording fix — is **proposed to notso-prompt**, never
+applied here by editing the account skill directly. Unsynchronised edits from two surfaces silently
+overwrite each other; a save replaces the whole file, so the loser never learns it lost.
+
+What this project may still change on its own: `.claude/commands/project-round-close.md`, but only by
+**regenerating** it from that source — never by hand-editing the shared rules inside it. Its provenance
+header names the source and the sha256 it was generated from. **Check currency in one command, from this
+repo:**
+
+```
+shasum -a 256 ~/notso_prompt/skill/SKILL.md
+```
+
+Match against the header means current. Mismatch means ask notso-prompt for the delta and regenerate.
+Compare hashes, never phrases — a grep for a phrase that wraps across a line reports ABSENT for text that
+is present, and answers a different question than the one asked (notso-prompt, 2026-09-14).
+
 **Project-specific traps a round skill must honor here:**
 
 - A prompt is not available until it is **committed** — check `git ls-files`, not `ls`. Worktrees see
@@ -83,6 +102,11 @@ Prompts and reports live beside the register, at `claude_work/prompts/<id>.md` a
   mount cannot remove, blocking Marc's next commit. Use `git --no-optional-locks`.
 - Other repos on this machine also use "round", `claude_work/`, prompts and registers. Never answer
   about another project's id from here (R-021).
+- ⚠️ **Under `.claude/`, the device bridge can CREATE but cannot DELETE.** `device_bash` writes there
+  fine; `rm` returns *Operation not permitted* until deletion is explicitly granted for the folder.
+  `device_commit_files` refuses `.claude` paths outright — the refusal is **per tool, not per path**
+  (measured by the notso-prompt project, 2026-09-14). Write nothing into `.claude/` that a future
+  session might need to remove.
 
 ### The flow
 
@@ -222,12 +246,17 @@ This is the single most important architectural fact and the reason the model lo
 
 - **The Web API has no history.** `GET /me/player/recently-played` returns at most 50 items per call.
   `/me/top/*` returns Spotify's own ranked rollups, not a time series.
-  > [!WARNING]
-  > **Provisional.** This document originally said the endpoint "cannot page backwards into the past."
-  > That was asserted more strongly than the evidence supported: Spotify's reference documents no temporal
-  > limit on the `before` cursor, and the live probe returned a **non-null `next`** carrying a `before=`
-  > value. `spot-main-R-018` follows `next` once to settle it, **before R-017 designs the poller.** If it
-  > returns older plays, the export dependency softens and several downstream assumptions change.
+  > [!NOTE]
+  > **Settled by measurement, `spot-main-R-018`, 2026-09-14 13:01 PT, profile `marc`.** Page 1's `next`
+  > carried `before=` decoding to exactly page 1's oldest `played_at`. Following it returned **0 items and
+  > `next = null`** — while `raw` held **14 distinct plays older than that cursor**, returned by the same
+  > endpoint ~19 hours earlier. **Older plays existed and were not returned**, which is what makes the
+  > empty page evidence rather than an absence of data.
+  >
+  > **Scope, and no further:** one page past the first, one account, one date, cursor taken from `next`.
+  > It says nothing about `before` values chosen independently, other accounts, or other days. The earlier
+  > wording ("cannot page backwards") is now supported — but it is recorded as a scoped measurement, not
+  > restored as a flat claim, because asserting it flat from the API reference is what cost four rounds.
 - **`recently-played` does not return podcast episodes at all.** Spotify's reference states this
   explicitly. The music-vs-podcast time split is therefore **impossible from the API** and comes
   only from the export.
@@ -300,6 +329,19 @@ The repo ships `.env.example` and `profiles.yml.example` with placeholder values
    family's email domains.
 3. **`nbstripout` as a pre-commit hook.** Notebooks are committed **with outputs stripped.**
 
+### Never re-issue a URL the response chose
+
+**`next`, `href` and every other link Spotify returns is untrusted input.** The API client attaches the
+bearer token to whatever it requests, so following a response-supplied URL as given would send Marc's
+token wherever that URL points — a look-alike host, a downgraded `http`, an off-port listener, a
+userinfo-stuffed origin.
+
+**Contract (R-018 C2):** a link from a response is never requested as-is. It is parsed, its origin and
+path checked against an allowlist, its query reduced to the parameters that endpoint is known to take,
+and then re-issued through the normal client. `spotify_lakehouse/paging.py` does this for
+recently-played. **Playlists, the library and top items all page by `next` too** — each one extends that
+module rather than trusting the URL.
+
 ### The notebook trap
 
 `GET /me` returns the account **email address**, display name, and country. The EDA notebook
@@ -340,6 +382,10 @@ A round is not complete until all of these are true:
 - `uv run dbt build` succeeds against `stg_<session>`/`mart_<session>` with all tests green.
 - `uv run ruff check .` and `uv run ruff format --check .` pass.
 - Pre-commit hooks pass on all staged files, gitleaks included.
+- ⚠️ **A scanner that reports "no files to check" is a FAILED check, not a pass.** Read the file count
+  every scanner reports and confirm it matches what you staged. zsh does not word-split an unquoted
+  `$VAR`, so a whole path list reaches a scanner as one nonexistent filename and every hook cheerfully
+  skips. Pass paths with `xargs -0` or one argument each (C6, R-004).
 - **A guard was proven to fail.** Every round that adds a test or constraint stages a break, records
   which named test went red, and reverts. "The tests pass" is not evidence; "test_play_event_grain
   failed with N duplicate keys when I removed the dedupe" is.
