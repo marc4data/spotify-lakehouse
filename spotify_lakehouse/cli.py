@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 import uuid
 from collections import Counter
 from datetime import UTC, datetime
@@ -17,13 +18,21 @@ from spotify_lakehouse.api import SpotifyApiError, SpotifyClient
 from spotify_lakehouse.artists import artist_ids_to_fetch
 from spotify_lakehouse.config import ConfigError, load_settings, session
 from spotify_lakehouse.db import connect, refresh_lock
+from spotify_lakehouse.paging import (
+    MAX_FOLLOW_NEXT,
+    RECENTLY_PLAYED_PATH,
+    UnsafeNextLink,
+    next_page_params,
+)
 from spotify_lakehouse.raw_store import feed_for_endpoint, insert_response, scrub, write_response
 from spotify_lakehouse.shape import describe_shape
 
 PROBE_ENDPOINTS: tuple[tuple[str, dict[str, Any] | None], ...] = (
     ("/me", None),
-    ("/me/player/recently-played", {"limit": 50}),
+    (RECENTLY_PLAYED_PATH, {"limit": 50}),
 )
+# Extra courtesy pause between followed pages, on top of the client's own pacing and Retry-After.
+PAGE_PAUSE_SECONDS = 2.0
 
 
 def _configure_logging() -> None:
@@ -88,6 +97,62 @@ def _summarize_recent(payload: dict[str, Any]) -> list[str]:
     ]
 
 
+def _played_at_values(page: dict[str, Any]) -> list[str]:
+    return [item["played_at"] for item in page.get("items") or [] if item.get("played_at")]
+
+
+def _page_line(number: int, page: dict[str, Any], new_count: int, detail: str = "") -> str:
+    played = sorted(_played_at_values(page))
+    span = f"played_at {played[0]} .. {played[-1]}" if played else "played_at: none"
+    next_state = "non-null" if page.get("next") else "null"
+    return (
+        f"  page {number}: items={len(page.get('items') or [])}, {span}, "
+        f"not seen on earlier pages={new_count}, next={next_state}{detail}"
+    )
+
+
+def _follow_next(
+    api: SpotifyClient,
+    conn: Any,
+    profile: str,
+    run_id: str,
+    first_page: dict[str, Any],
+    count: int,
+) -> list[str]:
+    """Follow `next` up to `count` times after page 1, persisting every page (spot-main-R-018)."""
+    feed = feed_for_endpoint(RECENTLY_PLAYED_PATH)
+    seen = set(_played_at_values(first_page))
+    lines = [
+        f"\nfollow-next: up to {count} page(s) after page 1",
+        _page_line(1, first_page, len(seen)),
+    ]
+    page = first_page
+    for number in range(2, count + 2):
+        next_url = page.get("next")
+        if not next_url:
+            lines.append(f"  stopped before page {number}: page {number - 1} returned next = null")
+            break
+        params = next_page_params(next_url)
+        before_utc = datetime.fromtimestamp(int(params["before"]) / 1000, tz=UTC)
+        time.sleep(PAGE_PAUSE_SECONDS)
+        payload = api.get(RECENTLY_PLAYED_PATH, params)
+        clean, _ = scrub(RECENTLY_PLAYED_PATH, payload)
+        source_file = write_response(
+            profile, feed, clean, run_id, datetime.now(UTC), key=f"page{number}"
+        )
+        row_id = insert_response(conn, clean, source_file, profile, feed)
+        played = set(_played_at_values(clean))
+        new_count = len(played - seen)
+        seen |= played
+        detail = (
+            f", requested before={before_utc:%Y-%m-%dT%H:%M:%S.%f}"[:-3]
+            + f"Z, raw.api_response.id={row_id}"
+        )
+        lines.append(_page_line(number, clean, new_count, detail))
+        page = clean
+    return lines
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     profile = auth.validate_slug(args.profile)
     settings = load_settings()
@@ -116,6 +181,8 @@ def cmd_probe(args: argparse.Namespace) -> int:
             if args.shape:
                 lines.append("  shape (as received, types only):")
                 lines.extend(f"    {path}: {types}" for path, types in shape.items())
+            if endpoint == RECENTLY_PLAYED_PATH and args.follow_next:
+                lines.extend(_follow_next(api, conn, profile, run_id, clean, args.follow_next))
     print("\n".join(lines))
     return 0
 
@@ -152,6 +219,16 @@ def cmd_extract_artists(args: argparse.Namespace) -> int:
     return 0
 
 
+def _follow_next_count(value: str) -> int:
+    try:
+        count = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"N must be a whole number, got {value!r}") from exc
+    if not 1 <= count <= MAX_FOLLOW_NEXT:
+        raise argparse.ArgumentTypeError(f"N must be between 1 and {MAX_FOLLOW_NEXT}, got {count}")
+    return count
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spot", description="spotify-lakehouse tooling")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -164,6 +241,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe = sub.add_parser("probe", help="GET /me and recently-played; persist raw responses")
     p_probe.add_argument("--profile", required=True, help="profile slug, e.g. marc")
     p_probe.add_argument("--shape", action="store_true", help="print key paths and types")
+    p_probe.add_argument(
+        "--follow-next",
+        nargs="?",
+        const=1,
+        default=0,
+        type=_follow_next_count,
+        metavar="N",
+        help=f"after recently-played page 1, follow `next` N more times (bare flag: 1, max "
+        f"{MAX_FOLLOW_NEXT}); every page is persisted",
+    )
     p_probe.set_defaults(func=cmd_probe)
 
     p_artists = sub.add_parser(
@@ -190,7 +277,13 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (ConfigError, auth.AuthError, SpotifyApiError, migrate.MigrationError) as exc:
+    except (
+        ConfigError,
+        auth.AuthError,
+        SpotifyApiError,
+        migrate.MigrationError,
+        UnsafeNextLink,
+    ) as exc:
         print(f"spot {args.command}: {exc}", file=sys.stderr)
         return 2
 
