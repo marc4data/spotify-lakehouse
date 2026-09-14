@@ -123,9 +123,9 @@ who contributes only an export file, with no API access, still gets a profile.
 | `spotify_user_id` | NULL for export-only contributors. |
 | `household_role` | `self`, `spouse`, `child`, `friend`. |
 | `home_timezone` | IANA name. Drives every local-date conversion. |
-| `has_api_access` | Whether they occupy one of the 5 dev-mode slots. **Derived, until R-017 exists, as "a `/me` response exists for this profile"** (C4, R-004) — the closest observable proxy. Redefine when the poller lands. |
+| `has_api_access` | Whether they occupy one of the 5 dev-mode slots. **Redefined now that R-017 has landed (F1):** a stored refresh token **and** at least one `ok` row in `spot_meta.poll_run`. A token proves consent was granted; a successful poll proves it still works. The extractor selects on the token alone — it must never read a dbt mart to decide what to extract. |
 | `export_coverage_start` / `_end` | Observed min/max `ts` in their export. **Derived, not declared** — every longitudinal comparison must clip to the intersection of coverage windows or it will show a family member "stopping listening" when their export simply ends. |
-| `api_coverage_start` | First poller row. **Until R-017 exists, the first `recently_played` ingestion** (C4, R-004). |
+| `api_coverage_start` | **The first `ok` `spot_meta.poll_run.finished_at` for the profile** (F1, R-017). Probe captures that predate the poller are real data but not coverage — they are one-off snapshots, not a guarantee of continuity. |
 
 **`email` never reaches the extractor.** The `user-read-email` scope is never requested, so Spotify does not
 return it, and accounts are matched on `spotify_user_id` instead — `spot auth` refuses to bind one Spotify id

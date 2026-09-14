@@ -257,6 +257,12 @@ This is the single most important architectural fact and the reason the model lo
   > It says nothing about `before` values chosen independently, other accounts, or other days. The earlier
   > wording ("cannot page backwards") is now supported — but it is recorded as a scoped measurement, not
   > restored as a flat claim, because asserting it flat from the API reference is what cost four rounds.
+- ⚠️ **An overflow gap is evidence of possible loss, not proof of it** (R-017 F3). The poller records a gap
+  when the 50-item window starts after the newest play already captured. But if exactly 50 plays happened
+  in the interval, the window's oldest *is* the first play after the mark and nothing was lost — two
+  timestamps cannot tell those apart. `items_returned` is stored so the gap can be judged: **a gap with
+  fewer than 50 items cannot be an overflow.** Any surface that shows gaps says this, or it reports
+  phantom losses as fact.
 - **`recently-played` does not return podcast episodes at all.** Spotify's reference states this
   explicitly. The music-vs-podcast time split is therefore **impossible from the API** and comes
   only from the export.
