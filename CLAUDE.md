@@ -58,6 +58,34 @@ R-numbers, or repo structure.
 
 ## 2. How work flows
 
+### Round contract
+
+The portable round skills (`project-round`, `project-round-close`) read these five facts from here. They
+are declared once, in this file, and nowhere else — a skill that hardcoded them would stop being portable,
+and a second copy is a copy that drifts.
+
+| | |
+|---|---|
+| **abbr** | `spot` |
+| **sessions** | `main` (primary checkout) · `wta`, `wtb`, … (worktrees). Each checkout holds an untracked `.session` file naming itself. |
+| **register** | `claude_work/spot_request_register.md` |
+| **id shape** | `spot-<session>-R-###` — e.g. `spot-wta-R-019`. Short form `R-###`. |
+| **repo root** | `~/projects/ai_orchestrator_claude/spotify` (worktrees: `spotify-<session>`). Cowork reaches it only through the device bridge, mounted at `$HOME/mnt/spotify`. |
+
+Prompts and reports live beside the register, at `claude_work/prompts/<id>.md` and
+`claude_work/reports/<id>-report.md`.
+
+**Project-specific traps a round skill must honor here:**
+
+- A prompt is not available until it is **committed** — check `git ls-files`, not `ls`. Worktrees see
+  only committed state (R-022).
+- Never run plain `git status` against the mounted repo from Cowork; it leaves a `.git/index.lock` the
+  mount cannot remove, blocking Marc's next commit. Use `git --no-optional-locks`.
+- Other repos on this machine also use "round", `claude_work/`, prompts and registers. Never answer
+  about another project's id from here (R-021).
+
+### The flow
+
 1. Marc makes a request in **Cowork**. Cowork assigns an R-number immediately and writes it to the
    register — before any round starts.
 2. Cowork writes a prompt file to `claude_work/prompts/spot-<session>-R-###.md`.
