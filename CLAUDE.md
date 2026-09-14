@@ -89,18 +89,27 @@ Prompts and reports live beside the register, at `claude_work/prompts/<id>.md` a
 1. Marc makes a request in **Cowork**. Cowork assigns an R-number immediately and writes it to the
    register — before any round starts.
 2. Cowork writes a prompt file to `claude_work/prompts/spot-<session>-R-###.md`.
-3. Marc pastes the **handoff cell** into the Claude Code session named in the filename. The cell names a
-   file path and nothing else:
+3. Marc pastes the **handoff cell** into the Claude Code session the id names. The cell is the slash
+   command and the round id, nothing else:
 
    ```
-   Read claude_work/prompts/spot-main-R-020.md and execute it.
+   /project-round-close R-004
    ```
 
-   **Never a bare id.** Marc has other projects on this machine that also call their units of work
-   "rounds", also keep a `claude_work/` directory with prompts and a request register, and at least one
-   has an account-level skill that triggers on round ids. A bare `R-020` is ambiguous across that
-   namespace; a repo-relative path is not. **If a session replies without having read the named file,
-   that is a failed handoff — start a fresh session rather than rephrasing** (R-021).
+   🚨 **This is the standard, and it is the only form Cowork hands over.** Not a bare id, not a raw file
+   path, not "read this file and execute it" — that form is retired and must never be offered again, not
+   as a fallback, not when a round is blocked, not when the skill looks unavailable. If a window rejects
+   the command, the fix is to say so and stop, not to route around the standard.
+
+   (The same skill is addressable as `/anthropic-skills:project-round-close` where a window needs the
+   plugin namespace. Same command, same skill.) A bare `R-004` is ambiguous
+   across Marc's machine — several of his projects call their units of work "rounds", keep a
+   `claude_work/` directory with prompts and a register, and one has its own skill that triggers on round
+   ids (R-021). The slash command names the skill explicitly, so there is nothing to guess. A raw path
+   works but skips every check the skill performs: committed-or-not, session match, duplicate ids.
+
+   **If a session replies without having opened the round, that is a failed handoff — start a fresh
+   session rather than rephrasing at it** (R-021).
 
    🚨 **A prompt file is not handed off until it is committed and pushed.** A worktree sees only
    committed state. Cowork handing over a path that exists solely in `main`'s working tree is a handoff
