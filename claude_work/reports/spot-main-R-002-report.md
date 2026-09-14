@@ -3,7 +3,8 @@
 **Session:** `main` · **Date:** 2026-09-13 · **Commit:** `3a499cf` (scaffold) + this report
 **Status for Cowork:** all acceptance items are met. Marc ran the credential-dependent steps on 2026-09-13
 (PDT): OAuth login, a live probe from `main`, and a live probe from `spotify-wta` with no extra setup (§4,
-§6). Observed API shapes are in §7; new contract findings F7–F10 are in §8. Ready for Cowork review.
+§6). Observed API shapes are in §7 (formats and enums in §7.4, full key-path listing in Appendix A); new
+contract findings F7–F10 are in §8. Ready for Cowork review.
 
 ---
 
@@ -261,6 +262,28 @@ assumes. Expected, not a finding.
 | `dim_profile.spotify_user_id` | `/me.id` | ✅ present |
 | `fct_play_event.ms_played` (API rows) | — | NULL by contract; confirmed there is no duration-played field |
 
+### 7.4 Value-level observations (formats, enums, counts — no identifying values)
+
+Re-read from the same four files. Both runs matched on every line below.
+
+| Observation | Observed | Why it matters |
+|---|---|---|
+| `items[].played_at` format | All 50 match `YYYY-MM-DDTHH:MM:SS.sssZ` (millisecond precision, UTC `Z`) | Casts cleanly to `timestamptz`; §2 minute truncation applies to a ms-precision value |
+| `items[]` order | Newest first (strictly descending `played_at`) | The poller's high-water mark is `items[0].played_at` |
+| Repeat plays in one window | 50 items, **43 distinct `track.uri`** | Grain is the play, not the track. Never dedupe on URI alone |
+| Overlap between runs | **50 of 50** `played_at` values identical across `main` (05:52Z) and `wta` (06:09Z) | Nothing was played in between, so every poll re-returns plays already seen. Loads must be idempotent on (`profile`, `played_at`, `uri`) |
+| `items[].context.type` | `playlist` × 48, `context = null` × 2 | Only `playlist` seen. `album`, `artist`, and `collection` weren't exercised. Null context has to be allowed in staging |
+| `track.album.album_type` | `album` 34 · `compilation` 8 · `single` 8 | All three documented enum values present |
+| `track.album.release_date_precision` | `day` 42 · `year` 8 (`month` not seen) | `release_date` is a string that can't be cast to `date` directly. Parse by precision |
+| Artists per track | 1 artist: 37 · 2: 10 · 3: 1 · 4: 2 | `primary_creator_name = artists[0]` drops credited collaborators on 13 of 50 |
+| `track.album.images[]` | Exactly 3 per album, `height`/`width` both `int` | |
+| `track.is_local` | `false` on all 50 | Local files not exercised |
+| `track.available_markets`, `popularity`, `preview_url` | Key **absent** (not null, not empty) | Staging must use `->>` / `coalesce`, not assume the key exists |
+| `cursors.after` / `cursors.before` | Both all-digit strings (epoch-ms shape) | |
+| `next` | Non-null; its query string carries `before=<cursor>` | Adds detail to F10: `next` is a `before`-cursor URL, i.e. it *points* backwards in time. Whether following it returns older plays is still untested |
+| `/me.images` | Empty list in both runs | |
+| `/me.explicit_content` | Both flags `false` | |
+
 ---
 
 ## 8. Contract findings — not amended; Cowork to decide
@@ -291,3 +314,110 @@ assumes. Expected, not a finding.
 | Pre-commit on staged files, gitleaks included | ✅ all hooks passed on `3a499cf` |
 | A guard proven to fail | ✅ §2 (five guards, including the `account_id` redaction added after the live probe) |
 | Build report | this file |
+
+---
+
+## Appendix A — Observed key paths (types only)
+
+Output of `spotify_lakehouse.shape.describe_shape` over the saved files. `[]` marks a list element and
+`a|b` means both types were seen at that path. The two runs produced identical output. `/me` paths are
+shown **after** the scrub (`email` removed before storage).
+
+### A.1 `GET /me`
+
+```
+$                                   dict
+$.account_id                        str     (undocumented; redacted in displays — F8)
+$.country                           str
+$.display_name                      str
+$.explicit_content                  dict
+$.explicit_content.filter_enabled   bool
+$.explicit_content.filter_locked    bool
+$.external_urls                     dict
+$.external_urls.spotify             str
+$.followers                         dict
+$.followers.href                    null
+$.followers.total                   int
+$.href                              str
+$.id                                str
+$.images                            list    (empty)
+$.product                           str
+$.type                              str
+$.uri                               str
+```
+
+### A.2 `GET /me/player/recently-played?limit=50`
+
+```
+$                                                     dict
+$.cursors                                             dict
+$.cursors.after                                       str
+$.cursors.before                                      str
+$.href                                                str
+$.items                                               list
+$.items[]                                             dict
+$.items[].context                                     dict|null
+$.items[].context.external_urls                       dict
+$.items[].context.external_urls.spotify               str
+$.items[].context.href                                str
+$.items[].context.type                                str
+$.items[].context.uri                                 str
+$.items[].played_at                                   str
+$.items[].track                                       dict
+$.items[].track.album                                 dict
+$.items[].track.album.album_type                      str
+$.items[].track.album.artists                         list
+$.items[].track.album.artists[]                       dict
+$.items[].track.album.artists[].external_urls         dict
+$.items[].track.album.artists[].external_urls.spotify str
+$.items[].track.album.artists[].href                  str
+$.items[].track.album.artists[].id                    str
+$.items[].track.album.artists[].name                  str
+$.items[].track.album.artists[].type                  str
+$.items[].track.album.artists[].uri                   str
+$.items[].track.album.external_urls                   dict
+$.items[].track.album.external_urls.spotify           str
+$.items[].track.album.href                            str
+$.items[].track.album.id                              str
+$.items[].track.album.images                          list
+$.items[].track.album.images[]                        dict
+$.items[].track.album.images[].height                 int
+$.items[].track.album.images[].url                    str
+$.items[].track.album.images[].width                  int
+$.items[].track.album.is_playable                     bool
+$.items[].track.album.name                            str
+$.items[].track.album.release_date                    str
+$.items[].track.album.release_date_precision          str
+$.items[].track.album.total_tracks                    int
+$.items[].track.album.type                            str
+$.items[].track.album.uri                             str
+$.items[].track.artists                               list
+$.items[].track.artists[]                             dict
+$.items[].track.artists[].external_urls               dict
+$.items[].track.artists[].external_urls.spotify       str
+$.items[].track.artists[].href                        str
+$.items[].track.artists[].id                          str
+$.items[].track.artists[].name                        str
+$.items[].track.artists[].type                        str
+$.items[].track.artists[].uri                         str
+$.items[].track.disc_number                           int
+$.items[].track.duration_ms                           int
+$.items[].track.explicit                              bool
+$.items[].track.external_ids                          dict
+$.items[].track.external_ids.isrc                     str
+$.items[].track.external_urls                         dict
+$.items[].track.external_urls.spotify                 str
+$.items[].track.href                                  str
+$.items[].track.id                                    str
+$.items[].track.is_local                              bool
+$.items[].track.is_playable                           bool
+$.items[].track.name                                  str
+$.items[].track.track_number                          int
+$.items[].track.type                                  str
+$.items[].track.uri                                   str
+$.limit                                               int
+$.next                                                str
+```
+
+Not present at any path: `total`, `track.popularity`, `track.preview_url`, `track.available_markets`,
+`track.album.available_markets`, `artists[].genres`, `email`.

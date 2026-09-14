@@ -40,7 +40,7 @@ create `stg_wta` / `mart_wta` if absent, install pre-commit hooks.
 | Resource | Scope | Location |
 |---|---|---|
 | Credentials, tokens | **Shared** | `~/.config/spot/` — outside every worktree |
-| dbt profile | **Shared** | `~/.dbt/profiles.yml`, target schema from `SPOT_SESSION` env |
+| dbt profile | **Shared** | `~/.dbt/profiles.yml`, target schema from `SPOT_SESSION`. **`make dbt-*` / `scripts/dbt.sh` is the supported entry point** — it reads `.session` and `~/.config/spot/.env` and exports the variable. Bare `uv run dbt` has no `SPOT_SESSION` and there is deliberately no default (F5). |
 | Postgres container | **Shared** | one container, port 5433, database `spot` |
 | `raw` schema | **Shared, append-only** | written only by the extractor |
 | `stg_<session>`, `mart_<session>` | **Per session** | dbt target |

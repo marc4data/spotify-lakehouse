@@ -15,7 +15,7 @@ inside a model, materialization strategy, indexes, test implementation, retry lo
 
 | Schema | Owner | Contents |
 |---|---|---|
-| `raw` | extractor (Python) | One table per source feed. Untyped: `id bigserial`, `payload jsonb`, `source_file text`, `profile_key text`, `ingested_at timestamptz`. **Never modified after insert.** Shared across all sessions. |
+| `raw` | extractor (Python) | **One table, `raw.api_response`, carrying a `feed` column** — not one table per endpoint (F2: a table per endpoint means a migration per new endpoint and an N-way union in staging). Untyped: `id bigserial`, `feed text not null`, `payload jsonb`, `source_file text`, `profile_slug text`, `ingested_at timestamptz`. **Never modified after insert**, enforced by triggers. `profile_slug`, not `profile_key` — the raw layer holds the slug, and `profile_key` means an int surrogate everywhere else (F3). `payload` is the response **as received minus contract-discarded fields** (F1) — "raw" means untyped and unmodelled, never unscrubbed. Shared across all sessions. |
 | `stg_<session>` | dbt | One view per raw feed. Flatten JSON, cast types, rename to project conventions. No business logic, no joins, no filtering except structurally-invalid rows. |
 | `int_<session>` (inside `stg_<session>`) | dbt | Deduplication, source reconciliation, genre allocation. The messy middle. |
 | `mart_<session>` | dbt | The star. Facts and dimensions only. |
@@ -53,8 +53,9 @@ project. Read this whole section before writing any of it.
 | `source_system` | text | derived | `export` or `api`. |
 | `source_file` | text | lineage | Export filename or extractor run id. |
 
-**`ip_addr` and `user_agent` from the export are dropped at staging and never land in the warehouse.**
-They add nothing to listening analysis and are the most sensitive fields in the file.
+**Dropped at staging, never landing in the warehouse:** `ip_addr` and `user_agent` from the export —
+they add nothing to listening analysis and are the most sensitive fields in the file — and **`account_id`**
+from `/me`, an identifier Spotify returns but does not document (F8). Nothing in the model needs it.
 
 ### Deduplication contract
 
@@ -122,7 +123,10 @@ who contributes only an export file, with no API access, still gets a profile.
 | `export_coverage_start` / `_end` | Observed min/max `ts` in their export. **Derived, not declared** — every longitudinal comparison must clip to the intersection of coverage windows or it will show a family member "stopping listening" when their export simply ends. |
 | `api_coverage_start` | First poller row. |
 
-**`email` is never stored.** The extractor reads it from `/me` to match accounts and discards it.
+**`email` never reaches the extractor.** The `user-read-email` scope is never requested, so Spotify does not
+return it, and accounts are matched on `spotify_user_id` instead — `spot auth` refuses to bind one Spotify id
+to two profile slugs (F7). This makes "email is never stored" structural rather than procedural. The scrub
+before storage stays as a backstop.
 
 ### `dim_content` — supertype, SCD Type 1
 
@@ -144,6 +148,15 @@ split requires a union at query time in every single query.
 Subtype tables `dim_track_detail` and `dim_episode_detail` hang off `content_key` and carry
 type-specific attributes (album_key, explicit, disc/track number; show_key, episode description,
 release_date).
+
+**`dim_track_detail.isrc`** carries `external_ids.isrc` where the API returns it (F9). ISRC is a
+*recording*-level identifier that survives re-issue under a new Spotify URI, which makes it the real fix for
+both the unresolvable-content problem above and the single-vs-album miss in §5. The export does not carry it,
+so it is populated only for API-resolved content and is therefore a second-tier key, never the primary one.
+
+**`dim_album.release_date` is stored as text, not `date`.** Observed precision varies (`day` and `year` both
+seen in one 50-track sample, `month` documented). Parse by `release_date_precision` at the point of use; a
+direct cast will fail.
 
 > [!CAUTION]
 > **The export contains URIs for content that no longer exists in the catalog.** Tracks are removed,
@@ -223,6 +236,10 @@ Tracks have multiple credited artists. Grain: one row per `(content_key, artist_
 is documented in the notebooks wherever artist time is shown. Splitting credit across features is a
 phase-2 change to a weight, not to a model.
 
+**It is not a small simplification.** In the one observed 50-track sample, **13 tracks (26%) had more than one
+credited artist** (2 artists ×10, 3 ×1, 4 ×2). Any "top artists" figure in phase 1 under-counts featured
+artists by roughly that much, and the notebook says so where the number is shown.
+
 ### `br_artist_genre`
 Grain: one row per `(artist_key, genre_key)` with `weight_factor = 1 / count(genres for that artist)`.
 
@@ -270,19 +287,40 @@ Marc's stated goal: "compare playlists to overlaps and misses." Two different qu
 Workout and Brody's Gym" is meaningless; "47 tracks in Marc's Workout that are not in Brody's Gym"
 is the answer.
 
-Comparison is at `content_key`, which means the **same recording**. A track that appears on both a
-single and an album has two URIs and will read as a miss. **Contract:** a `content_match_key` column
-on `dim_content` — normalized `lower(trim(content_name)) || '|' || lower(trim(primary_creator_name))`
-— supports a second, looser comparison mode. Both modes are exposed; the strict one is the default,
-and the notebook shows both numbers side by side because the gap between them is itself the story.
+Comparison is at `content_key`, which means the **same Spotify URI**. A track that appears on both a
+single and an album has two URIs and will read as a miss.
+
+**Contract — a three-tier match, most reliable first:**
+
+| Tier | Key | Coverage |
+|---|---|---|
+| 1 (strict, default) | `content_uri` | Everything |
+| 2 | `dim_track_detail.isrc` | API-resolved tracks only. Same recording, different URI — catches the single-vs-album case exactly (F9) |
+| 3 (loose) | `content_match_key` — normalized name + primary creator | Everything, including unresolved export rows. Will over-match on covers and live versions |
+
+All three are exposed and the notebook shows them side by side, because the gap between tiers is itself the
+story: tier 1 to tier 2 is re-issue churn, tier 2 to tier 3 is genuine ambiguity.
 
 ---
 
 ## 6. Open contract items
 
+### Settled 2026-09-13, from the R-002 live probe
+
+F1–F5 and F7–F9 are **accepted as proposed and folded into the sections above.** In short: raw payloads
+are as-received-minus-discarded-fields (F1); one `raw.api_response` with a `feed` column rather than a table
+per endpoint (F2); the raw profile column is `profile_slug` (F3); bootstrap "completes non-credential steps
+and fails naming the missing keys" (F4); `make dbt-*` is the supported dbt entry point (F5); email is
+structurally unavailable because the scope is never requested (F7); `account_id` is dropped at staging (F8);
+ISRC lands on `dim_track_detail` and becomes tier 2 of the playlist match (F9). F6 was withdrawn by the
+reporting session, correctly — the date was right in UTC.
+
+### Open
+
 | | Item | Needs |
 |---|---|---|
 | `spot-main-R-015` | Genre bucket list (§3) | **Marc's sign-off.** Everything else can be built around it; the seed file is the last thing to fill. |
-| `spot-main-R-016` | Do added dev-mode users need Premium? | Empirical test during onboarding. |
+| `spot-main-R-016` | Do added dev-mode users need Premium? | Empirical test at family onboarding. The owner account is confirmed `product: premium`; the added-user case is untested. |
+| `spot-main-R-018` | Does `recently-played` page backwards via `next`? | **One API call, and it gates R-017.** The probe returned a non-null `next` with a `before=` cursor. If following it yields plays older than the first 50, `CLAUDE.md` §4 is wrong and the poller design changes. |
 | — | MusicBrainz genre fallback | Phase 2. Contract written when Spotify actually removes `genres`, not before. |
-| — | Feature-artist credit splitting | Phase 2. A change to `weight_factor`, not to the model. |
+| — | Feature-artist credit splitting | Phase 2. A change to `weight_factor`, not to the model. Currently mis-attributing ~26% of tracks (§4). |

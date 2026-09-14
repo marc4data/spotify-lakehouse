@@ -61,7 +61,28 @@ R-numbers, or repo structure.
 1. Marc makes a request in **Cowork**. Cowork assigns an R-number immediately and writes it to the
    register — before any round starts.
 2. Cowork writes a prompt file to `claude_work/prompts/spot-<session>-R-###.md`.
-3. Marc pastes the prompt id into the Claude Code session named in the filename.
+3. Marc pastes the **handoff cell** into the Claude Code session named in the filename. The cell names a
+   file path and nothing else:
+
+   ```
+   Read claude_work/prompts/spot-main-R-020.md and execute it.
+   ```
+
+   **Never a bare id.** Marc has other projects on this machine that also call their units of work
+   "rounds", also keep a `claude_work/` directory with prompts and a request register, and at least one
+   has an account-level skill that triggers on round ids. A bare `R-020` is ambiguous across that
+   namespace; a repo-relative path is not. **If a session replies without having read the named file,
+   that is a failed handoff — start a fresh session rather than rephrasing** (R-021).
+
+   🚨 **A prompt file is not handed off until it is committed and pushed.** A worktree sees only
+   committed state. Cowork handing over a path that exists solely in `main`'s working tree is a handoff
+   to a file the session cannot open, and it will fail every time, correctly. **Commit, then hand off.**
+   Three consecutive rounds were lost to this (R-022).
+
+   **Small rounds skip the file entirely.** If the instruction fits in a paste, put it in the paste —
+   self-contained, no path, no dependency on repo state. The file-based prompt exists for rounds too
+   large to paste, not as a ceremony. A one-command change handed over as a file reference is pure
+   overhead, and it is overhead that has now failed more often than it has worked.
 4. Claude Code executes, and ends by writing a build report to
    `claude_work/reports/spot-<session>-R-###-report.md`.
 5. Cowork reads the **repository**, not the report, to move the register row.
@@ -131,9 +152,14 @@ Spotify Web API (extractors, launchd every 30 min)       ─┘        (immutabl
 
 This is the single most important architectural fact and the reason the model looks the way it does.
 
-- **The Web API has no history.** `GET /me/player/recently-played` returns at most 50 items and
-  cannot page backwards into the past. `/me/top/*` returns Spotify's own ranked rollups, not a
-  time series.
+- **The Web API has no history.** `GET /me/player/recently-played` returns at most 50 items per call.
+  `/me/top/*` returns Spotify's own ranked rollups, not a time series.
+  > [!WARNING]
+  > **Provisional.** This document originally said the endpoint "cannot page backwards into the past."
+  > That was asserted more strongly than the evidence supported: Spotify's reference documents no temporal
+  > limit on the `before` cursor, and the live probe returned a **non-null `next`** carrying a `before=`
+  > value. `spot-main-R-018` follows `next` once to settle it, **before R-017 designs the poller.** If it
+  > returns older plays, the export dependency softens and several downstream assumptions change.
 - **`recently-played` does not return podcast episodes at all.** Spotify's reference states this
   explicitly. The music-vs-podcast time split is therefore **impossible from the API** and comes
   only from the export.
