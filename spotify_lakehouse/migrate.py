@@ -9,7 +9,7 @@ from pathlib import Path
 
 import psycopg
 
-from spotify_lakehouse.config import mart_schema, repo_root, stg_schema
+from spotify_lakehouse.config import SESSION_PATTERN, mart_schema, repo_root, stg_schema
 
 FILENAME = re.compile(r"(\d{4})_[a-z0-9_]+\.sql")
 
@@ -116,6 +116,27 @@ def ensure_session_schemas(conn: psycopg.Connection, session_name: str) -> tuple
         for schema in schemas:
             conn.execute(
                 psycopg.sql.SQL("create schema if not exists {}").format(
+                    psycopg.sql.Identifier(schema)
+                )
+            )
+    return schemas
+
+
+def drop_session_schemas(conn: psycopg.Connection, session_name: str) -> tuple[str, str]:
+    """Drop stg_<session> and mart_<session> for a removed worktree (R-033).
+
+    Only worktree sessions (wta … wtz). Never main's schemas, never analytics.
+    """
+    if session_name == "main" or not SESSION_PATTERN.fullmatch(session_name):
+        raise MigrationError(
+            f"Refusing to drop schemas for {session_name!r}: only worktree sessions (wta … wtz) "
+            "can be dropped this way; main's schemas and analytics never are."
+        )
+    schemas = (stg_schema(session_name), mart_schema(session_name))
+    with conn.transaction():
+        for schema in schemas:
+            conn.execute(
+                psycopg.sql.SQL("drop schema if exists {} cascade").format(
                     psycopg.sql.Identifier(schema)
                 )
             )

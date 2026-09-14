@@ -30,3 +30,15 @@ sources:
         columns:
           - name: profile_slug
             tests: [unique, not_null]
+      - name: poll_run
+        description: One row per profile per `spot refresh` poll (R-017).
+        columns:
+          - name: id
+            tests: [unique, not_null]
+      - name: api_access_observation
+        description: >
+          Whether each registry profile had a stored refresh token, per refresh run (R-033). A boolean;
+          never the token.
+        columns:
+          - name: id
+            tests: [unique, not_null]

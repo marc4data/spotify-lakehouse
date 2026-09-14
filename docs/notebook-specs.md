@@ -74,6 +74,10 @@ real sample of each, so the breadth (and the holes) are visible in one document.
 ### 4.1 /me/player/recently-played — Recent Plays
 ### 4.2 /me/top/artists — Top Artists (×3 time ranges)
 ### 4.3 /me/top/tracks — Top Tracks (×3 time ranges)
+### 4.4 Local date versus UTC date                    (added R-008, confirmed R-033: how many plays move
+                                                       date under UTC grouping, with a captioned figure)
+### 4.5 The 50-item window is the whole API history   (added R-008, confirmed R-033: play count and
+                                                       span vs api_coverage_start; what needs the export)
 
 ## 5. Catalog Enrichment
 ### 5.1 /artists/{id} — Artist (incl. deprecated `genres`)

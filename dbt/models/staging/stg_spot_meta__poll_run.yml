@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: stg_spot_meta__poll_run
+    description: One row per profile per poll. api_coverage_start is the first ok poll (data-contracts §3).
+    columns:
+      - name: poll_run_id
+        tests: [unique, not_null]
+      - name: status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [ok, error]

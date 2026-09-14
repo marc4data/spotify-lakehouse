@@ -30,7 +30,7 @@ Cowork **owns**:
   policy. This is a statement about *what the data means*, which is a business decision.
 - Business definitions — what counts as a "listen," how genre buckets roll up, how a playlist
   "overlap" is defined.
-- The request register (`~/projects/ai_orchestrator_claude/spotify-pm/register.md`) and R-numbers.
+- The request register (location: the round contract, §2) and R-numbers.
 - Prompt authoring, sequencing, acceptance criteria, round review.
 - Verification that a build report matches the repository.
 
@@ -58,31 +58,19 @@ R-numbers, or repo structure.
 
 ## 2. How work flows
 
-### Round contract
+### Round contract — declared in the PM folder, not here
 
-The portable round skills (`project-round`, `project-round-close`) read these five facts from here. They
-are declared once, in this file, and nowhere else — a skill that hardcoded them would stop being portable,
-and a second copy is a copy that drifts.
+🚨 **The round contract lives at `~/projects/ai_orchestrator_claude/spotify-pm/round-contract.md`.** It is
+the single declaration of this project's five round facts (abbr, sessions, register, id shape, repo root),
+where prompts and reports live, and this project's round traps. **Read it there. This file does not restate
+it** — a second copy is a copy that drifts (R-033, answering R-032 F1: Cowork is connected to the PM folder,
+so the contract has to be readable from the PM folder).
 
-| | |
-|---|---|
-| **abbr** | `spot` |
-| **sessions** | `main` (primary checkout) · `wta`, `wtb`, … (worktrees). Each checkout holds an untracked `.session` file naming itself. |
-| **register** | `~/projects/ai_orchestrator_claude/spotify-pm/register.md` — **outside this repo** (R-032) |
-| **id shape** | `spot-<session>-R-###` — e.g. `spot-wta-R-019`. Short form `R-###`. |
-| **repo root** | `~/projects/ai_orchestrator_claude/spotify` (worktrees: `spotify-<session>`). Cowork's connection moves to the PM folder (R-032); until Marc switches it, Cowork reaches this repo through the device bridge at `$HOME/mnt/spotify`. |
-
-Prompts and reports live beside the register, **outside this repo**, in the PM folder
-`~/projects/ai_orchestrator_claude/spotify-pm/`: `prompts/<id>.md` and `reports/<id>-report.md` (R-032).
-The PM folder is **its own git repository, not a worktree of this one.** Every checkout — `main` and every
-`spotify-<session>` worktree — reads it by absolute path, so **an uncommitted prompt there is readable**:
-the round skill's "written but not committed" state no longer applies to this project. Cowork owns
-`prompts/` and `register.md`; Claude Code owns `reports/`. A pre-commit hook rejects any file under
-`claude_work/` in this repo, so the old layout cannot creep back.
-
-Where the generated command file `.claude/commands/project-round-close.md` names `claude_work/…` paths,
-**this contract overrides them** until notso-prompt regenerates it from a skill that reads paths from the
-round contract (R-032 F2). That file is not hand-edited here.
+🚨 **The command file's paths do not bind this project.** `.claude/commands/project-round-close.md` is
+generated from notso-prompt's skill and still says `claude_work/reports/…` and "No such id in
+`claude_work/`". **Ignore those literals: the round contract's paths override them** until notso-prompt
+regenerates the file from a skill that reads paths from the contract (R-032 F2). The file is not
+hand-edited here, and a pre-commit hook rejects any file under `claude_work/` in this repo.
 
 🚨 **This project does not edit the round skill. Marc's rule, 2026-09-14.** The **notso-prompt** project
 owns `~/notso_prompt/skill/SKILL.md` as the single source of truth. Any change this project wants to the
@@ -103,26 +91,14 @@ Match against the header means current. Mismatch means ask notso-prompt for the 
 Compare hashes, never phrases — a grep for a phrase that wraps across a line reports ABSENT for text that
 is present, and answers a different question than the one asked (notso-prompt, 2026-09-14).
 
-**Project-specific traps a round skill must honor here:**
-
-- ~~A prompt is not available until it is committed~~ — **retired by R-032.** Prompts live in the PM
-  folder and are read by absolute path from every checkout, so there is no committed-vs-working-tree gap
-  (the failure was R-022).
-- Never run plain `git status` against the mounted repo from Cowork; it leaves a `.git/index.lock` the
-  mount cannot remove, blocking Marc's next commit. Use `git --no-optional-locks`.
-- Other repos on this machine also use "round", `claude_work/`, prompts and registers. Never answer
-  about another project's id from here (R-021).
-- ⚠️ **Under `.claude/`, the device bridge can CREATE but cannot DELETE.** `device_bash` writes there
-  fine; `rm` returns *Operation not permitted* until deletion is explicitly granted for the folder.
-  `device_commit_files` refuses `.claude` paths outright — the refusal is **per tool, not per path**
-  (measured by the notso-prompt project, 2026-09-14). Write nothing into `.claude/` that a future
-  session might need to remove.
+**Project-specific round traps** are declared in the round contract, with the five facts (R-033).
 
 ### The flow
 
 1. Marc makes a request in **Cowork**. Cowork assigns an R-number immediately and writes it to the
    register — before any round starts.
-2. Cowork writes a prompt file to `~/projects/ai_orchestrator_claude/spotify-pm/prompts/spot-<session>-R-###.md`.
+2. Cowork writes a prompt file, `spot-<session>-R-###.md`, into the PM folder's `prompts/` (path: the
+   round contract).
 3. Marc pastes the **handoff cell** into the Claude Code session the id names. The cell is the slash
    command and the round id, nothing else:
 
@@ -185,8 +161,8 @@ is present, and answers a different question than the one asked (notso-prompt, 2
    self-contained, no path, no dependency on repo state. The file-based prompt exists for rounds too
    large to paste, not as a ceremony. A one-command change handed over as a file reference is pure
    overhead, and it is overhead that has now failed more often than it has worked.
-4. Claude Code executes, and ends by writing a build report to
-   `~/projects/ai_orchestrator_claude/spotify-pm/reports/spot-<session>-R-###-report.md`.
+4. Claude Code executes, and ends by writing a build report, `spot-<session>-R-###-report.md`, into the
+   PM folder's `reports/` (path: the round contract).
 5. Cowork reads the **repository**, not the report, to move the register row.
 
 **R-number format: `spot-<session>-R-###`** — e.g. `spot-main-R-007`, `spot-wta-R-042`. The session
@@ -405,7 +381,7 @@ A round is not complete until all of these are true:
 - **A guard was proven to fail.** Every round that adds a test or constraint stages a break, records
   which named test went red, and reverts. "The tests pass" is not evidence; "test_play_event_grain
   failed with N duplicate keys when I removed the dedupe" is.
-- A build report exists at `~/projects/ai_orchestrator_claude/spotify-pm/reports/spot-<session>-R-###-report.md` naming: files
+- A build report exists in the PM folder's `reports/` (path: the round contract) naming: files
   changed, contracts touched, the red-test evidence above, and anything the contract got wrong.
 
 ---

@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: stg_spot_meta__api_access_observation
+    description: Token presence per registry profile per refresh run; feeds dim_profile.has_api_access.
+    columns:
+      - name: api_access_observation_id
+        tests: [unique, not_null]
+      - name: has_stored_token
+        tests: [not_null]

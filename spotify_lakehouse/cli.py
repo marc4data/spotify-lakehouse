@@ -37,9 +37,11 @@ PAGE_PAUSE_SECONDS = 2.0
 
 
 def _configure_logging() -> None:
+    # Resolve sys.stderr when a logger is created, not once at configure time: a stream captured at
+    # configure time goes stale if stderr is swapped later (a closed test capture stream, R-033).
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
-        logger_factory=structlog.PrintLoggerFactory(sys.stderr),
+        logger_factory=lambda *args: structlog.PrintLogger(sys.stderr),
     )
 
 
@@ -59,6 +61,18 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         schemas = migrate.ensure_session_schemas(conn, session_name)
     print(f"migrations applied: {', '.join(applied) if applied else 'none pending'}")
     print(f"session schemas present: {', '.join(schemas)}")
+    return 0
+
+
+def cmd_drop_session_schemas(args: argparse.Namespace) -> int:
+    if args.session_name == session():
+        raise ConfigError(
+            f"Refusing to drop this checkout's own session schemas ({args.session_name}). "
+            "Run it from another checkout."
+        )
+    with connect() as conn:
+        dropped = migrate.drop_session_schemas(conn, args.session_name)
+    print(f"dropped session schemas (if present): {', '.join(dropped)}")
     return 0
 
 
@@ -290,7 +304,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             )
             return 0
         settings = load_settings()
-        to_poll, without_token = poller.api_profiles(conn)
+        to_poll, without_token = poller.record_api_access(conn, run_id)
         for slug in without_token:
             print(f"{stamp} spot refresh: {slug} has no stored token; skipped (spot auth {slug})")
         if not to_poll:
@@ -370,6 +384,12 @@ def build_parser() -> argparse.ArgumentParser:
         "sync-profiles", help="load ~/.config/spot/profiles.csv into spot_meta.profile_registry"
     )
     p_profiles.set_defaults(func=cmd_sync_profiles)
+
+    p_drop = sub.add_parser(
+        "drop-session-schemas", help="drop stg_<session> / mart_<session> of a removed worktree"
+    )
+    p_drop.add_argument("session_name", metavar="session", help="worktree session, e.g. wtc")
+    p_drop.set_defaults(func=cmd_drop_session_schemas)
 
     p_migrate = sub.add_parser("migrate", help="apply raw migrations and create session schemas")
     p_migrate.set_defaults(func=cmd_migrate)

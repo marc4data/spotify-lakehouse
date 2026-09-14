@@ -23,10 +23,15 @@ uv run spot probe --profile marc
 ## New worktree
 
 ```bash
-git worktree add ../spotify-wta -b feat/<topic>
-echo wta > ../spotify-wta/.session
-cd ../spotify-wta && make bootstrap     # same credentials, same database, no other setup
+make worktree NAME=wta          # ../spotify-wta on branch feat/wta: .session, bootstrap, and a summary
+code -n ../spotify-wta          # open it in its own VS Code window
+make worktree-remove NAME=wta   # from main: removes it, deletes the branch if merged, drops its schemas
 ```
+
+Session names are `wta` … `wtz`. The worktree shares credentials, the database and `data/raw` with every
+other checkout, and reads the PM folder (`~/projects/ai_orchestrator_claude/spotify-pm`) by absolute path;
+nothing else is configured by hand. `make worktree-remove` refuses a worktree that holds uncommitted or
+untracked work.
 
 ## Layout
 
@@ -49,7 +54,9 @@ cd ../spotify-wta && make bootstrap     # same credentials, same database, no ot
 | `uv run spot migrate` / `make migrate` | Apply raw migrations; create this session's schemas |
 | `make dbt-parse` | `dbt parse` with `SPOT_SESSION` from `.session` |
 | `make test`, `make lint` | pytest; ruff check + format check |
+| `make notebook` | Start Jupyter Lab (`uv run jupyter lab`) to open and run notebooks interactively |
 | `make report-01` | Execute `notebooks/01_api_inventory.ipynb`, render it to `reports/01_api_inventory.html`, strip its outputs again |
+| `make worktree NAME=wtc` / `make worktree-remove NAME=wtc` | Create and provision / remove a parallel worktree (see "New worktree") |
 
 ## Notebooks and reports
 

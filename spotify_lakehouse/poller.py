@@ -98,6 +98,24 @@ def api_profiles(conn: psycopg.Connection) -> tuple[list[str], list[str]]:
     return [p for p in registry if p in tokens], [p for p in registry if p not in tokens]
 
 
+def record_api_access(conn: psycopg.Connection, run_id: str) -> tuple[list[str], list[str]]:
+    """Record whether each registry profile has a stored token; return (to poll, skipped).
+
+    data-contracts §3's has_api_access needs the token's presence, which lives outside the
+    database, so the poller makes it observable (R-033). Only a boolean is written, never the token.
+    """
+    to_poll, without_token = api_profiles(conn)
+    rows = [(run_id, slug, True) for slug in to_poll]
+    rows += [(run_id, slug, False) for slug in without_token]
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany(
+            "insert into spot_meta.api_access_observation (run_id, profile_slug, has_stored_token) "
+            "values (%s, %s, %s)",
+            rows,
+        )
+    return to_poll, without_token
+
+
 def high_water_mark(conn: psycopg.Connection, profile: str) -> datetime | None:
     """Newest played_at ever captured for the profile, by any capture (probe or poll)."""
     row = conn.execute(
