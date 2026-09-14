@@ -53,8 +53,16 @@ pass" is not evidence a guard works; a guard nobody has watched fail is not a co
 ## 5. Report
 
 Write `claude_work/reports/<full-id>-report.md`. Name the files changed, the red-test transcript, the
-measurements the prompt asked for, and anything the Cowork prompt got wrong. End the report with a
-measured clock line:
+measurements the prompt asked for, and anything the Cowork prompt got wrong.
+
+🚨 **End your reply with the return handoff cell, in a fenced block Marc can copy without editing** — the
+same command, with the same **full** id, which Cowork will read as "review this round's report":
+
+    /project-round-close <abbr>-<session>-R-###
+
+**A round that does not hand itself back is not finished.** Do not make Marc compose the handoff.
+
+Then the measured clock line, last:
 
     **Start YYYY-MM-DD H:MM AM/PM / End H:MM AM/PM : MM:SS**
 

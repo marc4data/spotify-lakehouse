@@ -15,7 +15,11 @@ inside a model, materialization strategy, indexes, test implementation, retry lo
 
 | Schema | Owner | Contents |
 |---|---|---|
-| `raw` | extractor (Python) | **One table, `raw.api_response`, carrying a `feed` column** — not one table per endpoint (F2: a table per endpoint means a migration per new endpoint and an N-way union in staging). Untyped: `id bigserial`, `feed text not null`, `payload jsonb`, `source_file text`, `profile_slug text`, `ingested_at timestamptz`. **Never modified after insert**, enforced by triggers. `profile_slug`, not `profile_key` — the raw layer holds the slug, and `profile_key` means an int surrogate everywhere else (F3). `payload` is the response **as received minus contract-discarded fields** (F1) — "raw" means untyped and unmodelled, never unscrubbed. Shared across all sessions. |
+| `raw` | extractor (Python) | **One table, `raw.api_response`, carrying a `feed` column** — not one table per endpoint (F2: a table per endpoint means a migration per new endpoint and an N-way union in staging). Untyped: `id bigserial`, `feed text not null`, `payload jsonb`, `source_file text`, `profile_slug text`, `ingested_at timestamptz`. **Never modified after insert**, enforced by triggers — with exactly one exception: a **schema
+migration that adds a column which did not exist at insert time** may backfill that column, inside the
+migration's own transaction, with the update trigger disabled for its duration, and must checksum every
+pre-existing column before and after to prove nothing else was written. Adding `feed` to rows written
+before the amendment is that case (R-004 §3). No other write to `raw` is permitted, ever. `profile_slug`, not `profile_key` — the raw layer holds the slug, and `profile_key` means an int surrogate everywhere else (F3). `payload` is the response **as received minus contract-discarded fields** (F1) — "raw" means untyped and unmodelled, never unscrubbed. Shared across all sessions. |
 | `stg_<session>` | dbt | One view per raw feed. Flatten JSON, cast types, rename to project conventions. No business logic, no joins, no filtering except structurally-invalid rows. |
 | `int_<session>` (inside `stg_<session>`) | dbt | Deduplication, source reconciliation, genre allocation. The messy middle. |
 | `mart_<session>` | dbt | The star. Facts and dimensions only. |
@@ -171,17 +175,18 @@ direct cast will fail.
 Standard Kimball unknown members: `content_key = -1` for genuinely absent, `-2` for
 not-yet-resolved-but-pending.
 
-### `dim_artist` — SCD Type 2 on `genres`
+### `dim_artist` — SCD Type 1
 
 | Column | Notes |
 |---|---|
 | `artist_key`, `artist_id`, `artist_uri`, `artist_name` | |
-| `genres_observed` | text[], as returned. |
-| `valid_from`, `valid_to`, `is_current` | |
+| `genre_source` | Which vocabulary populated this artist's genres. NULL until R-024 lands. |
 
-Type 2 because **Spotify has marked the artist `genres` field deprecated.** Snapshotting it with a
-date means the genre analysis survives the field's removal. Every genre value this warehouse ever
-sees is preserved with the date it was observed.
+**Was SCD Type 2 on `genres`; that is now unbuildable.** Spotify returns no `genres` key to this app on
+any artist-bearing endpoint (measured 55/55, R-004 §1), so there is no slowly-changing attribute to
+track. Type 1 on name until a genre source exists; **when R-024 lands, this returns to Type 2 on the
+sourced genres plus `genre_source`**, because an external vocabulary changes over time and the reason
+for snapshotting was always to survive that.
 
 ### `dim_album`, `dim_show` — SCD Type 1
 Straightforward. `dim_show` carries publisher, total_episodes, media_type.
@@ -197,7 +202,15 @@ calendar attributes plus `is_weekend`, `day_of_week_name`, `iso_week`, `month_st
 (`overnight` 00–05, `morning` 05–09, `midday` 09–12, `afternoon` 12–17, `evening` 17–22,
 `night` 22–24).
 
-### `dim_genre` and `dim_genre_bucket`
+### `dim_genre` and `dim_genre_bucket` — ⏸️ DEFERRED to `spot-main-R-024`
+
+> [!CAUTION]
+> **Everything in this subsection presumes Spotify's genre vocabulary, which this app no longer
+> receives.** It is kept because the *shape* survives a change of source — a raw-tag dimension, a bucket
+> dimension, a seed-file mapping, a drift test — but **the bucket list below cannot be signed off until
+> R-024 chooses a source and its vocabulary is known.** MusicBrainz tags and Last.fm tags are different
+> vocabularies from Spotify micro-genres and from each other. R-015 is deferred on that basis, not
+> dropped.
 
 Spotify emits several thousand micro-genres (`melodic drill`, `escape room`, `pov: indie`). Nobody
 reads a radar chart with 4,000 spokes.
@@ -240,11 +253,15 @@ phase-2 change to a weight, not to a model.
 credited artist** (2 artists ×10, 3 ×1, 4 ×2). Any "top artists" figure in phase 1 under-counts featured
 artists by roughly that much, and the notebook says so where the number is shown.
 
-### `br_artist_genre`
+### `br_artist_genre` — ⏸️ DEFERRED to `spot-main-R-024`
 Grain: one row per `(artist_key, genre_key)` with `weight_factor = 1 / count(genres for that artist)`.
 
-**Allocation chain for the radar chart:**
+**Allocation chain for the radar chart** — the full chain, once a genre source exists:
 `ms_played` → primary artist (weight 1.0) → each of that artist's genres (weight 1/N) → bucket (sum).
+
+**Until then the chain ends at the artist.** The reconciliation model still ships and still reports every
+step it can reach: total ms → music ms → artist-resolved ms. With no genre source, 100% of music time is
+`unclassified_ms` — which is the correct, visible answer, not a failure to be papered over.
 
 Consequences Claude Code must handle and the notebook must state:
 - An artist with no genres contributes to **no bucket**, not to `other`. `other` means "mapped to a

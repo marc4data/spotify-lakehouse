@@ -93,7 +93,7 @@ Prompts and reports live beside the register, at `claude_work/prompts/<id>.md` a
    command and the round id, nothing else:
 
    ```
-   /anthropic-skills:project-round-close R-004
+   /project-round-close spot-main-R-004
    ```
 
    🚨 **This is the standard, and it is the only form Cowork hands over.** Not a bare id, not a raw file
@@ -119,7 +119,21 @@ Prompts and reports live beside the register, at `claude_work/prompts/<id>.md` a
    the device bridge cannot write to `~/.claude` — that one is Marc's to run by hand.
 
    **The working command form is recorded here only after it has been observed working in Claude Code,
-   never inferred from how Cowork addresses it.** A bare `R-004` is ambiguous
+   never inferred from how Cowork addresses it.**
+
+   🚨 **The cell carries the FULL id — `spot-<session>-R-###`, never the short `R-###`.** The session
+   segment is what tells Marc which window to paste into, and it is what lets the command refuse a round
+   that belongs to a different session. A short id makes both of those impossible and forces a glob that
+   can match two things. The short form is legal *inside* the skill's resolver; it is not legal in a
+   handoff cell.
+
+   4. **When the round finishes, the Code session ends its report with the same cell.** Marc pastes it
+   into Cowork, which then reviews the report and closes the round. The command is surface-dependent by
+   design, so one cell works in both directions — Code executes it, Cowork reviews it. **A report that
+   does not end with its return cell is not finished**, because it leaves Marc to compose the handoff
+   himself.
+
+   A bare `R-004` is ambiguous
    across Marc's machine — several of his projects call their units of work "rounds", keep a
    `claude_work/` directory with prompts and a register, and one has its own skill that triggers on round
    ids (R-021). The slash command names the skill explicitly, so there is nothing to guess. A raw path
@@ -232,10 +246,17 @@ Cut off for apps registered after 2024-11-27, which includes this one:
 `/audio-features`, `/audio-analysis`, `/recommendations`, `/artists/{id}/related-artists`,
 `/browse/featured-playlists`, `/browse/categories/{id}/playlists`, 30-second preview URLs.
 
-**Artist `genres` still returns but Spotify now marks the field deprecated.** Every genre value is
-therefore snapshotted into `dim_artist` with the date observed, so the analysis survives the field
-being removed. A fallback genre source (MusicBrainz) is specified in the contracts as a phase-2
-task, not a phase-1 one.
+> [!CAUTION]
+> **Artist `genres` is gone, not deprecated. Measured 2026-09-14 (spot-main-R-004 §1):** the `genres`
+> key is **absent from 55 of 55 artist objects** across `GET /artists/{id}` (45 artists, every one in
+> `raw`), `/me/top/artists` and `/me/following`. `popularity` and `followers` are absent too. This
+> document previously said genres "still returns but is marked deprecated" — that was read off the API
+> reference, which still documents the field, and stated as though it were a measurement of live
+> behaviour. **Documentation is not a measurement.** The same error class cost four rounds on R-023.
+>
+> Consequence: Spotify supplies **no genre data to this app at all**. The radar chart needs an external
+> source (`spot-main-R-024`), and the 13-bucket taxonomy presumed Spotify's micro-genre vocabulary,
+> so it cannot be signed off until that source's vocabulary is known.
 
 ### The 5-user ceiling
 
