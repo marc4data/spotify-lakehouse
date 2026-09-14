@@ -13,6 +13,10 @@ tokens*.json
 # --- Session identity is per checkout (docs/worktree-protocol.md §1) ---
 .session
 
+# --- Machine-specific Claude Code config. The command file IS tracked; local settings are not. ---
+.claude/settings.local.json
+.claude/settings.json
+
 # --- Python / tooling ---
 .venv/
 __pycache__/

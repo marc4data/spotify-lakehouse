@@ -93,7 +93,7 @@ Prompts and reports live beside the register, at `claude_work/prompts/<id>.md` a
    command and the round id, nothing else:
 
    ```
-   /project-round-close R-004
+   /anthropic-skills:project-round-close R-004
    ```
 
    🚨 **This is the standard, and it is the only form Cowork hands over.** Not a bare id, not a raw file
@@ -101,8 +101,25 @@ Prompts and reports live beside the register, at `claude_work/prompts/<id>.md` a
    as a fallback, not when a round is blocked, not when the skill looks unavailable. If a window rejects
    the command, the fix is to say so and stop, not to route around the standard.
 
-   (The same skill is addressable as `/anthropic-skills:project-round-close` where a window needs the
-   plugin namespace. Same command, same skill.) A bare `R-004` is ambiguous
+   ⚠️ **Verified 2026-09-14: BOTH bare `/project-round-close` and namespaced
+   `/anthropic-skills:project-round-close` return `Unknown command` in Claude Code**, and a window
+   restart does not change it. Account and plugin skills from claude.ai exist only in the Cowork cloud
+   container; they are **not installed on this Mac**, so there was never a local skill for either form to
+   address. `/cfdb-round` resolves in the same window because it reaches Code by a different route.
+
+   Cowork asserted the namespaced form as "the standard" on the strength of how Cowork itself addresses
+   the skill, and never tested the Code side. That is precisely the failure the round rules exist to
+   prevent: **a measurement is reproducible; a diagnosis is an inference from one.** Four rounds were
+   lost to it.
+
+   **What actually reaches Claude Code** is a repo-local command file,
+   `.claude/commands/project-round-close.md`, committed with the project. It carries only the execute
+   half of the workflow; Cowork keeps the close format from the account skill, so there is no duplicated
+   content to drift. A user-level install at `~/.claude/skills/` would cover every project at once, but
+   the device bridge cannot write to `~/.claude` — that one is Marc's to run by hand.
+
+   **The working command form is recorded here only after it has been observed working in Claude Code,
+   never inferred from how Cowork addresses it.** A bare `R-004` is ambiguous
    across Marc's machine — several of his projects call their units of work "rounds", keep a
    `claude_work/` directory with prompts and a register, and one has its own skill that triggers on round
    ids (R-021). The slash command names the skill explicitly, so there is nothing to guess. A raw path
