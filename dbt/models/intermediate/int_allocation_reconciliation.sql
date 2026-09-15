@@ -16,12 +16,10 @@ plays as (
     select
         plays.profile_slug,
         plays.ms_played,
-        coalesce(tracks.content_type, 'unknown') as content_type,
+        coalesce(plays.content_type, 'unknown') as content_type,
         coalesce(artists.is_fetched, false) as is_primary_artist_resolved,
         artists_with_genre.artist_id is not null as has_genre
     from {{ ref('int_play_events__deduped') }} as plays
-    left join {{ ref('int_tracks__latest') }} as tracks
-        on tracks.content_uri = plays.content_uri
     left join {{ ref('int_content_artists') }} as primary_artist
         on primary_artist.content_uri = plays.content_uri
         and primary_artist.is_primary

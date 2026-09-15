@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import structlog
 
-from spotify_lakehouse import auth, migrate, musicbrainz, poller, profiles
+from spotify_lakehouse import auth, export, migrate, musicbrainz, poller, profiles
 from spotify_lakehouse.api import SpotifyApiError, SpotifyClient
 from spotify_lakehouse.artists import artist_ids_to_fetch
 from spotify_lakehouse.config import ConfigError, load_settings, musicbrainz_contact, session
@@ -264,6 +264,42 @@ def cmd_resolve_musicbrainz(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_load_export(args: argparse.Namespace) -> int:
+    profile = auth.validate_slug(args.profile)
+    profile_dir = export.exports_dir() / profile
+    if not profile_dir.is_dir():
+        raise ConfigError(f"{profile_dir} does not exist. Put {profile}'s export zip there first.")
+    settings = load_settings(require_spotify=False)
+    with (
+        connect(settings, autocommit=True) as conn,
+        try_advisory_lock(conn, export.LOCK_NAME) as acquired,
+    ):
+        if not acquired:
+            print(
+                f"spot load-export: the {export.LOCK_NAME} lock is held elsewhere", file=sys.stderr
+            )
+            return 1
+        registered = conn.execute(
+            "select 1 from spot_meta.profile_registry where profile_slug = %s", (profile,)
+        ).fetchone()
+        if not registered:
+            raise ConfigError(
+                f"'{profile}' is not in spot_meta.profile_registry. Fix: add it to "
+                "~/.config/spot/profiles.csv, then `uv run spot sync-profiles`."
+            )
+        extracted = export.extract_archives(profile_dir)
+        print(f"spot load-export  profile={profile}  newly unzipped members: {len(extracted)}")
+        summary = export.load_profile(conn, profile, profile_dir)
+    for result in summary.files:
+        print(f"  {result.source_file}: records {result.records}, inserted {result.inserted}")
+    rate = summary.inserted / summary.seconds if summary.seconds else 0.0
+    print(
+        f"files {len(summary.files)}, records {summary.records}, inserted {summary.inserted} "
+        f"in {summary.seconds:.1f} s ({rate:,.0f} rows/s)"
+    )
+    return 0
+
+
 def _iso(value: datetime | None) -> str:
     if value is None:
         return "none"
@@ -410,6 +446,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_artists.set_defaults(func=cmd_extract_artists)
 
+    p_export = sub.add_parser(
+        "load-export",
+        help="unzip and load a profile's Extended Streaming History into raw.export_record",
+    )
+    p_export.add_argument("--profile", required=True, help="profile slug, e.g. marc")
+    p_export.set_defaults(func=cmd_load_export)
+
     p_mb = sub.add_parser(
         "resolve-musicbrainz",
         help="ISRC -> MusicBrainz recording -> artist genres and tags; resumable, skips stored ids",
@@ -444,6 +487,7 @@ def main(argv: list[str] | None = None) -> int:
         migrate.MigrationError,
         UnsafeNextLink,
         musicbrainz.MusicBrainzError,
+        export.ExportError,
     ) as exc:
         print(f"spot {args.command}: {exc}", file=sys.stderr)
         return 2

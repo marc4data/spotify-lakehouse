@@ -38,6 +38,8 @@ models:
                 field: time_of_day_key
       - name: ended_at_utc
         tests: [not_null]
+      - name: is_qualified_play
+        tests: [not_null]
       - name: is_ms_played_imputed
         tests:
           - accepted_values:

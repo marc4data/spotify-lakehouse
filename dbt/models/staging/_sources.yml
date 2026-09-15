@@ -37,6 +37,15 @@ sources:
               - accepted_values:
                   arguments:
                     values: [isrc_lookup, artist]
+      - name: export_record
+        description: >
+          One row per Extended Streaming History play record (R-003). ip_addr and user_agent are
+          discarded at ingest and rejected by a check constraint.
+        columns:
+          - name: id
+            tests: [unique, not_null]
+          - name: profile_slug
+            tests: [not_null]
 
   - name: spot_meta
     schema: spot_meta

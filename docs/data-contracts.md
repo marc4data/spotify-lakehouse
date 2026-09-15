@@ -15,7 +15,7 @@ inside a model, materialization strategy, indexes, test implementation, retry lo
 
 | Schema | Owner | Contents |
 |---|---|---|
-| `raw` | extractor (Python) | **Two tables, distinguished by where the response came from (R-024).** **`raw.external_response`** holds one row per response from a **non-Spotify** source (MusicBrainz, R-024): `id bigserial`, `source text` (checked against an allowlist, `musicbrainz` for now), `feed text` (`isrc_lookup`, `artist`; same format check), `request_key text` (the ISRC or MBID requested, so a 404 is tied to the id it answers and is never re-fetched), `payload jsonb`, `source_file text` (under `data/raw/external/<source>/<feed>/`), `ingested_at timestamptz`. **It has no `profile_slug`, deliberately:** an external source's answer about an artist is the same whoever played it, and a fake value in a not-null column is how a dimension starts lying. Same append-only triggers as below. **`raw.api_response`** holds one row per **Spotify Web API** response, **carrying a `feed` column** — not one table per endpoint (F2: a table per endpoint means a migration per new endpoint and an N-way union in staging). Untyped: `id bigserial`, `feed text not null`, `payload jsonb`, `source_file text`, `profile_slug text`, `ingested_at timestamptz`. **Never modified after insert**, enforced by triggers — with exactly one exception: a **schema
+| `raw` | extractor (Python) | **Three tables, distinguished by where the data came from (R-024, R-003).** **`raw.export_record`** (R-003) holds one row per **play record** from a Spotify Extended Streaming History export — per record, not per file, because a file holds ~15,000 records and one multi-megabyte `jsonb` is unqueryable: `id bigserial`, `profile_slug text not null`, `source_file text not null` (the export filename), `record_index int not null` (position within that file, so every record is addressable), `payload jsonb not null`, `ingested_at timestamptz`, **unique on `(profile_slug, source_file, record_index)`** so a re-run cannot double-load. `ip_addr` and `user_agent` are discarded before insert (§2) and rejected by a check constraint. Files live outside the repo under `~/spot-data/exports/<profile_slug>/`, the zip kept as the immutable original. Same append-only triggers as below. **`raw.external_response`** holds one row per response from a **non-Spotify** source (MusicBrainz, R-024): `id bigserial`, `source text` (checked against an allowlist, `musicbrainz` for now), `feed text` (`isrc_lookup`, `artist`; same format check), `request_key text` (the ISRC or MBID requested, so a 404 is tied to the id it answers and is never re-fetched), `payload jsonb`, `source_file text` (under `data/raw/external/<source>/<feed>/`), `ingested_at timestamptz`. **It has no `profile_slug`, deliberately:** an external source's answer about an artist is the same whoever played it, and a fake value in a not-null column is how a dimension starts lying. Same append-only triggers as below. **`raw.api_response`** holds one row per **Spotify Web API** response, **carrying a `feed` column** — not one table per endpoint (F2: a table per endpoint means a migration per new endpoint and an N-way union in staging). Untyped: `id bigserial`, `feed text not null`, `payload jsonb`, `source_file text`, `profile_slug text`, `ingested_at timestamptz`. **Never modified after insert**, enforced by triggers — with exactly one exception: a **schema
 migration that adds a column which did not exist at insert time** may backfill that column, inside the
 migration's own transaction, with the update trigger disabled for its duration, and must checksum every
 pre-existing column before and after to prove nothing else was written. Adding `feed` to rows written
@@ -57,9 +57,13 @@ project. Read this whole section before writing any of it.
 | `source_system` | text | derived | `export` or `api`. |
 | `source_file` | text | lineage | Export filename or extractor run id. |
 
-**Dropped at staging, never landing in the warehouse:** `ip_addr` and `user_agent` from the export —
-they add nothing to listening analysis and are the most sensitive fields in the file — and **`account_id`**
-from `/me`, an identifier Spotify returns but does not document (F8). Nothing in the model needs it.
+**Discarded at ingest, never written to `raw`:** `ip_addr` and `user_agent` from the export (and the
+`ip_addr_decrypted` / `user_agent_decrypted` names older exports use) — they add nothing to listening analysis
+and are the most sensitive fields in the file. `raw` is append-only, so a field that reached it could never be
+removed: §1's "as received minus contract-discarded fields" governs, and the loader scrubs them before insert,
+with a check constraint on `raw.export_record` as the backstop (R-003; this sentence formerly said "dropped at
+staging", which §1 made impossible). **Dropped at staging:** **`account_id`** from `/me`, an identifier Spotify
+returns but does not document (F8). Nothing in the model needs it.
 
 ### Deduplication contract
 
@@ -181,18 +185,20 @@ them in the accepted-values tests rather than letting a row carry a value the co
 `(unknown)`; `dim_time_of_day.daypart` gains `unknown`. A dimension whose unknown row violates its own
 enumeration is a contract that cannot pass its own test.
 
-### `dim_artist` — SCD Type 1
+### `dim_artist` — SCD Type 2 on sourced genres
 
 | Column | Notes |
 |---|---|
-| `artist_key`, `artist_id`, `artist_uri`, `artist_name` | |
-| `genre_source` | Which vocabulary populated this artist's genres. NULL until R-024 lands. |
+| `artist_key`, `artist_id`, `artist_uri`, `artist_name` | `artist_key` identifies a version; `artist_id` repeats across versions. |
+| `genre_source` | Which vocabulary populated this version's genres: `musicbrainz`, or NULL when the artist resolved to no genre or tag strings. |
+| `valid_from`, `valid_to`, `is_current` | Version bounds; exactly one current version per `artist_id`. |
 
-**Was SCD Type 2 on `genres`; that is now unbuildable.** Spotify returns no `genres` key to this app on
-any artist-bearing endpoint (measured 55/55, R-004 §1), so there is no slowly-changing attribute to
-track. Type 1 on name until a genre source exists; **when R-024 lands, this returns to Type 2 on the
-sourced genres plus `genre_source`**, because an external vocabulary changes over time and the reason
-for snapshotting was always to survive that.
+**SCD Type 2 on the sourced genre and tag strings plus `genre_source` (R-024).** Spotify returns no
+`genres` key to this app on any artist-bearing endpoint (measured 55/55, R-004 §1); genres come from
+MusicBrainz, joined by ISRC. A version changes when the **set** of strings changes, not on vote counts;
+name is Type 1 across versions. History is rebuilt from `raw.external_response`, not held in a dbt
+snapshot, so every session derives the same versions (R-024 F5). An external vocabulary changes over
+time, and surviving that is the reason for versioning.
 
 ### `dim_album`, `dim_show` — SCD Type 1
 Straightforward. `dim_show` carries publisher, total_episodes, media_type.
@@ -210,13 +216,12 @@ calendar attributes plus `is_weekend`, `day_of_week_name`, `iso_week`, `month_st
 
 ### `dim_genre` and `dim_genre_bucket`
 
-> [!CAUTION]
-> **Everything in this subsection presumes Spotify's genre vocabulary, which this app no longer
-> receives.** It is kept because the *shape* survives a change of source — a raw-tag dimension, a bucket
-> dimension, a seed-file mapping, a drift test — but **the bucket list below cannot be signed off until
-> R-024 chooses a source and its vocabulary is known.** MusicBrainz tags and Last.fm tags are different
-> vocabularies from Spotify micro-genres and from each other. R-015 is deferred on that basis, not
-> dropped.
+> [!NOTE]
+> **The genre vocabulary is MusicBrainz's, not Spotify's (R-024).** `dim_genre` holds one row per distinct
+> MusicBrainz string per `tag_type` (`genre`, the curated list; `tag`, the folksonomy). The *shape* below
+> survived the change of source — a raw-tag dimension, a bucket dimension, a seed-file mapping, a drift
+> test. The prose about Spotify micro-genres is the original motivation, kept for context; the bucket list
+> and its sign-off are tracked as R-015.
 
 Spotify emits several thousand micro-genres (`melodic drill`, `escape room`, `pov: indie`). Nobody
 reads a radar chart with 4,000 spokes.
@@ -260,14 +265,18 @@ credited artist** (2 artists ×10, 3 ×1, 4 ×2). Any "top artists" figure in ph
 artists by roughly that much, and the notebook says so where the number is shown.
 
 ### `br_artist_genre`
-Grain: one row per `(artist_key, genre_key)` with `weight_factor = 1 / count(genres for that artist)`.
+Grain: one row per `(artist_key, genre_key)` with `weight_factor = 1 / count(genres for that artist)`
+**within one `tag_type`** — the curated `genre` list and the `tag` folksonomy are parallel allocations,
+never one denominator (R-024).
 
-**Allocation chain for the radar chart** — the full chain, once a genre source exists:
+**Allocation chain for the radar chart:**
 `ms_played` → primary artist (weight 1.0) → each of that artist's genres (weight 1/N) → bucket (sum).
 
-**Until then the chain ends at the artist.** The reconciliation model still ships and still reports every
-step it can reach: total ms → music ms → artist-resolved ms. With no genre source, 100% of music time is
-`unclassified_ms` — which is the correct, visible answer, not a failure to be papered over.
+**Built through the genre step (R-024).** `int_allocation_reconciliation` reports every step — total →
+music → artist-resolved → genre-allocated — each naming its residual. The genre step follows one
+MusicBrainz vocabulary (`genre` by default); artist-resolved music whose primary artist has no string in it
+is `unclassified_ms` — the correct, visible answer, not a failure to be papered over. The bucket step waits
+on the mapping (R-015).
 
 Consequences Claude Code must handle and the notebook must state:
 - An artist with no genres contributes to **no bucket**, not to `other`. `other` means "mapped to a
@@ -345,5 +354,5 @@ reporting session, correctly — the date was right in UTC.
 | `spot-main-R-015` | Genre bucket list (§3) | **Marc's sign-off.** Everything else can be built around it; the seed file is the last thing to fill. |
 | `spot-main-R-016` | Do added dev-mode users need Premium? | Empirical test at family onboarding. The owner account is confirmed `product: premium`; the added-user case is untested. |
 | ~~`spot-main-R-018`~~ | ~~Does `recently-played` page backwards via `next`?~~ | **SETTLED 2026-09-14: no.** Following `next` once returned 0 items and `next = null`, with 14 older plays demonstrably available from the same endpoint a day earlier. R-017's poller is a catcher, not a backfiller. See `CLAUDE.md` §4. |
-| — | MusicBrainz genre fallback | Phase 2. Contract written when Spotify actually removes `genres`, not before. |
+| ~~—~~ | ~~MusicBrainz genre fallback~~ | **BUILT by `spot-main-R-024`** as the genre source, not a fallback: Spotify supplies no `genres` to this app (R-004). |
 | — | Feature-artist credit splitting | Phase 2. A change to `weight_factor`, not to the model. Currently mis-attributing ~26% of tracks (§4). |

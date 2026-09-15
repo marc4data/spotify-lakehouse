@@ -160,6 +160,24 @@ else
   ok "symlink created"
 fi
 
+# Export files, per profile: ~/spot-data/exports/<profile_slug>/ (spot-main-R-003). Same rule as raw.
+step "data/exports -> $DATA_HOME/exports"
+mkdir -p "$DATA_HOME/exports"
+if [[ -L data/exports ]]; then
+  if [[ "$(readlink data/exports)" == "$DATA_HOME/exports" ]]; then
+    ok "symlink in place"
+  else
+    record data-exports-link "data/exports points at $(readlink data/exports), not $DATA_HOME/exports." \
+      "Fix: rm data/exports && make bootstrap"
+  fi
+elif [[ -e data/exports ]]; then
+  record data-exports-link "data/exports is a real directory; it must be a symlink so worktrees share one copy." \
+    "Fix: mv data/exports/* $DATA_HOME/exports/ && rmdir data/exports && make bootstrap"
+else
+  ln -s "$DATA_HOME/exports" data/exports
+  ok "symlink created"
+fi
+
 # --- 7. Migrations and session schemas ---------------------------------------------------------
 step "raw migrations + stg_${SESSION} / mart_${SESSION}"
 if ((DB_UP)); then

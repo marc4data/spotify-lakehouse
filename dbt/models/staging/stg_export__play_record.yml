@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: stg_export__play_record
+    description: One row per Extended Streaming History record; ip_addr and user_agent discarded at ingest (R-003).
+    columns:
+      - name: raw_record_id
+        tests: [unique, not_null]
+      - name: ms_played
+        tests: [not_null]
+      - name: content_type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [track, episode, audiobook_chapter]

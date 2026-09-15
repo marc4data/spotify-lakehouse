@@ -12,7 +12,7 @@ profiles as (
 ),
 
 contents as (
-    select content_key, content_uri
+    select content_key, content_uri, duration_ms
     from {{ ref('dim_content') }}
     where content_key > 0
 ),
@@ -22,6 +22,7 @@ localized as (
         plays.*,
         profiles.profile_key,
         contents.content_key,
+        contents.duration_ms as content_duration_ms,
         plays.ended_at_utc at time zone profiles.home_timezone as ended_at_local
     from plays
     left join profiles
@@ -46,6 +47,13 @@ select
     ended_at_utc,
     ms_played,
     is_ms_played_imputed,
+    -- §2 "what counts as a listen": qualified_play_count = count(*) filter (where is_qualified_play).
+    -- ms_played >= 30 s, or >= half the content's duration. NULL ms_played (every API row) never qualifies;
+    -- the half-duration clause needs a known duration, which export-only content does not have.
+    coalesce(
+        ms_played >= 30000 or ms_played >= 0.5 * content_duration_ms,
+        false
+    ) as is_qualified_play,
     reason_start,
     reason_end,
     was_skipped,

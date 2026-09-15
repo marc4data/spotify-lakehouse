@@ -26,6 +26,7 @@ ranked as (
 select
     profile_slug,
     content_uri,
+    content_type,
     ended_at_utc,
     ms_played,
     is_ms_played_imputed,

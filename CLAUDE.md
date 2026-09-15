@@ -275,9 +275,9 @@ Cut off for apps registered after 2024-11-27, which includes this one:
 > reference, which still documents the field, and stated as though it were a measurement of live
 > behaviour. **Documentation is not a measurement.** The same error class cost four rounds on R-023.
 >
-> Consequence: Spotify supplies **no genre data to this app at all**. The radar chart needs an external
-> source (`spot-main-R-024`), and the 13-bucket taxonomy presumed Spotify's micro-genre vocabulary,
-> so it cannot be signed off until that source's vocabulary is known.
+> Consequence: Spotify supplies **no genre data to this app at all**. Genres come from **MusicBrainz,
+> joined by ISRC** (`spot-main-R-024`: `dim_genre`, `br_artist_genre`, `dim_artist` SCD Type 2). The
+> bucket taxonomy that maps them to radar spokes is R-015.
 
 ### The 5-user ceiling
 

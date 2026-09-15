@@ -31,6 +31,16 @@ ok_polls as (
     group by profile_slug
 ),
 
+export_coverage as (
+    -- observed, not declared (data-contracts §3): every record in the profile's export, chapters included
+    select
+        profile_slug,
+        min(ended_at_utc) as export_coverage_start,
+        max(ended_at_utc) as export_coverage_end
+    from {{ ref('stg_export__play_record') }}
+    group by profile_slug
+),
+
 profiles as (
     select
         (row_number() over (order by registry.profile_slug))::int as profile_key,
@@ -42,8 +52,8 @@ profiles as (
         -- a stored refresh token AND at least one ok poll (data-contracts §3)
         coalesce(latest_token.has_stored_token, false)
         and ok_polls.first_ok_poll_at is not null as has_api_access,
-        null::timestamptz as export_coverage_start,  -- derived from the export in R-003
-        null::timestamptz as export_coverage_end,
+        export_coverage.export_coverage_start,
+        export_coverage.export_coverage_end,
         -- the first ok poll; probe captures before it are data, not coverage (data-contracts §3)
         ok_polls.first_ok_poll_at as api_coverage_start
     from registry
@@ -53,6 +63,8 @@ profiles as (
         on latest_token.profile_slug = registry.profile_slug
     left join ok_polls
         on ok_polls.profile_slug = registry.profile_slug
+    left join export_coverage
+        on export_coverage.profile_slug = registry.profile_slug
 ),
 
 unknown_member as (

@@ -20,18 +20,17 @@ wtb     # ~/projects/ai_orchestrator_claude/spotify-wtb
 missing — no defaulting to `main`, because a worktree that silently thinks it is `main` will build
 into `analytics` and overwrite the promoted marts.
 
-Creating a worktree:
+Creating a worktree, from `main` (R-033):
 
 ```bash
-git worktree add ../spotify-wta -b feat/<topic>
-cd ../spotify-wta
-echo wta > .session
-make bootstrap        # idempotent; safe to run in every worktree
+make worktree NAME=wta   # ../spotify-wta on branch feat/wta, writes .session, runs make bootstrap
 ```
 
-`make bootstrap` must complete in seconds and be safe to re-run. It does: `uv sync`, verify
-`~/.config/spot/` exists and is populated, verify the Postgres container is up (start it if not),
-create `stg_wta` / `mart_wta` if absent, install pre-commit hooks.
+It refuses a name that is not `wt` plus one letter, an existing path, branch or worktree, and prints what it
+provisioned (session, branch, venv, schemas, data links, hooks). `make bootstrap` must complete in seconds
+and be safe to re-run. It does: `uv sync`, verify `~/.config/spot/` exists and is populated, verify the
+Postgres container is up (start it if not), link `data/raw` and `data/exports`, create `stg_wta` /
+`mart_wta` if absent, install pre-commit hooks.
 
 ---
 
@@ -46,6 +45,7 @@ create `stg_wta` / `mart_wta` if absent, install pre-commit hooks.
 | `stg_<session>`, `mart_<session>` | **Per session** | dbt target |
 | `analytics` schema | **`main` only** | promotion target |
 | `data/raw/` JSON files | **Shared** | symlinked into each worktree from `~/spot-data/raw` |
+| `data/exports/` export files | **Shared** | symlinked from `~/spot-data/exports`, one folder per profile (R-003) |
 | Python venv | Per worktree | `.venv/`, created by `uv sync` |
 | `published/` extracts | Per worktree | gitignored |
 
@@ -89,7 +89,8 @@ connection string in it is a bug and, in a public repo, a leak.
   (`models/marts/fct_play_event.yml` alongside `fct_play_event.sql`), never a directory-wide file.
   This makes the conflict structurally impossible.
 - After merge, every other worktree runs `git fetch && git rebase origin/main && make bootstrap`.
-- `git worktree remove ../spotify-wta` when done. `make bootstrap` does not clean up after you.
+- When done, from `main`: `make worktree-remove NAME=wta`. It refuses a worktree holding uncommitted or
+  untracked work, deletes `feat/wta` only if merged, and drops `stg_wta` / `mart_wta` (R-033).
 
 ---
 
