@@ -1,8 +1,9 @@
-"""Helpers for notebooks/01_api_inventory.ipynb (spot-main-R-008, docs/notebook-specs.md §1).
+"""API sections of notebooks/01_data_inventory.ipynb (spot-main-R-008, R-042; notebook-specs §1).
 
 One emitter builds every endpoint section, so the sections cannot drift apart. Surfaces already
 in the warehouse are read from `raw.api_response`; surfaces never extracted are called live, once,
-under the `spot_refresh` lock. Every sample and every schema example passes through
+under the notebook's own `spot_notebook` lock. The export, MusicBrainz and warehouse sections are
+in `data_inventory`. Every sample and every schema example passes through
 `redact.redact_profile`. Nothing here follows a URL a response chose (CLAUDE.md §5): ids taken
 from responses are validated before they are placed in a path.
 """
@@ -250,7 +251,7 @@ SPECS: tuple[EndpointSpec, ...] = (
     EndpointSpec(
         "5.1",
         "/artists/{id}",
-        "Artist (incl. deprecated `genres`)",
+        "Artist (`genres` absent)",
         "none (catalog)",
         "stg_spotify__artist → dim_artist",
     ),
@@ -266,7 +267,8 @@ SPECS: tuple[EndpointSpec, ...] = (
         "/tracks/{id}",
         "Track",
         "none (catalog)",
-        "not extracted (dim_content is built from recently-played)",
+        "stg_spotify__track → int_tracks__latest, dim_content (export URIs, one call per id; "
+        "R-037, R-039)",
     ),
     EndpointSpec(
         "5.4",
@@ -517,10 +519,11 @@ def warehouse_capture(
     return capture
 
 
-def collect_live(
-    api: SpotifyClient, *, album_id: str | None, track_id: str | None
-) -> dict[str, Capture]:
-    """Every section not yet extracted, one call each (top items: one per time range)."""
+def collect_live(api: SpotifyClient, *, album_id: str | None) -> dict[str, Capture]:
+    """Every section not yet extracted, one call each (top items: one per time range).
+
+    Never `/tracks` or `/artists`: both are extracted, so §5.1 and §5.3 read the warehouse (R-042).
+    """
     captures: dict[str, Capture] = {}
 
     def add(number: str, *parts: Part, notes: list[str] | None = None) -> Capture:
@@ -610,11 +613,6 @@ def collect_live(
     else:
         part = _unavailable("album", "album", "GET /albums/{id}", "no album id in the warehouse")
     add("5.2", part)
-    if is_spotify_id(track_id):
-        part, _ = _live(api, "track", "track", f"/tracks/{track_id}", "/tracks/{id}", "self")
-    else:
-        part = _unavailable("track", "track", "GET /tracks/{id}", "no track id in the warehouse")
-    add("5.3", part)
 
     captures["5.4"] = _collect_podcasts(api)
 
@@ -868,8 +866,8 @@ def emit_endpoint(capture: Capture) -> None:
     source = (
         "Read from the warehouse — this surface is already extracted, so no API call was made."
         if capture.source == "warehouse"
-        else "Called live for this report, under the `spot_refresh` lock, because this surface "
-        "is not extracted."
+        else "Called live for this report, under the notebook's own `spot_notebook` lock (the "
+        "poller is never made to skip), because this surface is not extracted."
     )
     _md(f"{source} **Scope:** {spec.scope}. **Feeds:** {spec.feeds}.")
     _show(
@@ -959,7 +957,7 @@ def dumps_payload(value: Any) -> str:
     return json.dumps(value, sort_keys=True)[:500]
 
 
-# --- Notebook sections that read the context (01_api_inventory.ipynb) ----------------------------
+# --- Notebook sections that read the context (01_data_inventory.ipynb) ---------------------------
 
 
 def _section_key(number: str) -> list[int]:
@@ -1015,20 +1013,31 @@ def collect(ctx: Any) -> dict[str, Capture]:
     artist_records = captures["5.1"].parts[0].records
     with_genres = sum(1 for record in artist_records if "genres" in record)
     captures["5.1"].notes.append(
-        f"The heading says *deprecated* `genres`; measured, it is **absent**: {with_genres} of "
-        f"{len(artist_records)} stored artist responses carry a `genres` key (R-004 found 0 of "
-        "55 across three endpoints). Genres now come from MusicBrainz by ISRC instead "
-        "(`dim_artist.genre_source`, `dim_genre`, `br_artist_genre`; R-024)."
+        f"`genres` is **absent, not deprecated**: {with_genres} of {len(artist_records)} stored "
+        "artist responses carry the key, measured in this run (R-004 found 0 of 55 across three "
+        "endpoints). Genres come from MusicBrainz by ISRC instead (§9; `dim_genre`, "
+        "`br_artist_genre`; R-024)."
+    )
+    captures["5.3"] = warehouse_capture(
+        "5.3",
+        "track",
+        ctx.rows(
+            "select id, ingested_at, payload from raw.api_response where feed = 'track' order by id"
+        ),
+        "self",
+        "track responses",
+    )
+    captures["5.3"].notes.append(
+        "Read from the warehouse, not called: `spot resolve-tracks` stored one `GET /tracks/{id}` "
+        "response per export track id, most-listened first (R-037, R-039). Batch `GET "
+        "/tracks?ids=` returns 403 to this app (§6.2)."
     )
 
     album_id = ctx.scalar(
         "select album_id from {mart}.dim_album where album_key > 0 order by album_key limit 1"
     )
-    track_id = ctx.scalar(
-        "select content_id from {stg}.int_tracks__latest order by first_seen_at limit 1"
-    )
     with ctx.api() as api:
-        captures.update(collect_live(api, album_id=album_id, track_id=track_id))
+        captures.update(collect_live(api, album_id=album_id))
     return dict(sorted(captures.items(), key=lambda item: _section_key(item[0])))
 
 
@@ -1040,6 +1049,11 @@ def emit_intro(ctx: Any, captures: dict[str, Capture]) -> None:
         "(select count(*) from {mart}.dim_artist where artist_key > 0 and is_current), "
         "(select count(*) from {mart}.dim_album where album_key > 0)"
     )[0]
+    export_records, external = ctx.rows(
+        "select (select count(*) from raw.export_record where profile_slug = %s), "
+        "(select count(*) from raw.external_response)",
+        (ctx.profile,),
+    )[0]
     _md(
         f"**Run:** {ctx.started_at:%Y-%m-%d %H:%M} UTC · **Profile:** `{ctx.profile}` · "
         f"**Session:** `{ctx.session}` (schemas `{ctx.stg_schema}`, `{ctx.mart_schema}`)\n\n"
@@ -1048,7 +1062,9 @@ def emit_intro(ctx: Any, captures: dict[str, Capture]) -> None:
         f"**Coverage of the {len(SPECS)} endpoint sections in §1–§5:** "
         f"{counts['warehouse']} read from the warehouse, {counts['live']} called live "
         f"({counts['live calls']} API calls), {counts['not sampled']} could not be sampled. "
-        "Six removed endpoints were deliberately not called (§6.1). §7 has the full map."
+        "Six removed endpoints were deliberately not called (§6.1). §7 has the full map.\n\n"
+        f"**Beside the API:** {export_records} Extended Streaming History records (§8), "
+        f"{external} MusicBrainz responses (§9), and the warehouse built from all three (§10)."
     )
 
 
@@ -1059,12 +1075,12 @@ def emit_local_vs_utc(ctx: Any) -> None:
         "select count(*), count(*) filter (where f.date_key <> "
         "to_char(f.ended_at_utc at time zone 'UTC', 'YYYYMMDD')::int), max(p.home_timezone) "
         "from {mart}.fct_play_event f join {mart}.dim_profile p using (profile_key) "
-        "where p.profile_slug = %s",
+        "where p.profile_slug = %s and f.source_system = 'api'",
         (ctx.profile,),
     )[0]
     share = shifted / total if total else 0
     _md(
-        f"**{shifted} of {total} plays ({share:.0%})** fall on a different calendar date in "
+        f"**{shifted} of {total} API plays ({share:.0%})** fall on a different calendar date in "
         f"`{timezone}` than in UTC. `date_key` is derived from the local date "
         "(data-contracts §2), never from UTC."
     )
@@ -1073,7 +1089,7 @@ def emit_local_vs_utc(ctx: Any) -> None:
         "to_char(d.full_date, 'YYYY-MM-DD') as local_date, count(*) as plays "
         "from {mart}.fct_play_event f join {mart}.dim_date d using (date_key) "
         "join {mart}.dim_profile p using (profile_key) where p.profile_slug = %s "
-        "group by 1, 2 order by 1, 2",
+        "and f.source_system = 'api' group by 1, 2 order by 1, 2",
         (ctx.profile,),
     )
     _show(frame)
@@ -1111,9 +1127,16 @@ def emit_local_vs_utc(ctx: Any) -> None:
 def emit_api_window(ctx: Any) -> None:
     plays, first_play, last_play = ctx.rows(
         "select count(*), min(f.ended_at_utc), max(f.ended_at_utc) from {mart}.fct_play_event f "
-        "join {mart}.dim_profile p using (profile_key) where p.profile_slug = %s",
+        "join {mart}.dim_profile p using (profile_key) "
+        "where p.profile_slug = %s and f.source_system = 'api'",
         (ctx.profile,),
     )[0]
+    export_first = ctx.scalar(
+        "select min(f.ended_at_utc) from {mart}.fct_play_event f "
+        "join {mart}.dim_profile p using (profile_key) "
+        "where p.profile_slug = %s and f.source_system = 'export'",
+        (ctx.profile,),
+    )
     model_start = ctx.scalar(
         "select api_coverage_start from {mart}.dim_profile where profile_slug = %s", (ctx.profile,)
     )
@@ -1125,7 +1148,7 @@ def emit_api_window(ctx: Any) -> None:
         ctx.scalar(
             "select count(*) from {mart}.fct_play_event f "
             "join {mart}.dim_profile p using (profile_key) "
-            "where p.profile_slug = %s and f.ended_at_utc < %s",
+            "where p.profile_slug = %s and f.source_system = 'api' and f.ended_at_utc < %s",
             (ctx.profile, contract_start),
         )
         if contract_start
@@ -1138,9 +1161,10 @@ def emit_api_window(ctx: Any) -> None:
     _show(
         pd.DataFrame(
             [
-                {"fact": "plays in fct_play_event", "value": str(plays)},
-                {"fact": "earliest play", "value": stamp(first_play)},
-                {"fact": "latest play", "value": stamp(last_play)},
+                {"fact": "API plays in fct_play_event", "value": str(plays)},
+                {"fact": "earliest API play", "value": stamp(first_play)},
+                {"fact": "latest API play", "value": stamp(last_play)},
+                {"fact": "earliest export play", "value": stamp(export_first)},
                 {
                     "fact": "api_coverage_start per data-contracts §3 (first ok poll)",
                     "value": stamp(contract_start),
@@ -1152,10 +1176,12 @@ def emit_api_window(ctx: Any) -> None:
     )
     _callout(
         "CAUTION",
-        f"**This is the whole API history.** Every play the warehouse holds for `{ctx.profile}` "
-        f"falls between {stamp(first_play)} and {stamp(last_play)}. The API returns at most 50 "
-        "recent plays and does not page backwards (R-018), so **everything before the earliest "
-        "play needs the Extended Streaming History export** (R-003, R-014).",
+        f"**This is the whole API history.** Every API play the warehouse holds for "
+        f"`{ctx.profile}` falls between {stamp(first_play)} and {stamp(last_play)}. The API "
+        "returns at most 50 recent plays, and following `next` past page 1 returned nothing "
+        "older (R-018: one page, one account, one date). **Everything earlier comes from the "
+        f"Extended Streaming History export**, which is loaded: its earliest play is "
+        f"{stamp(export_first)} (§8).",
     )
     if contract_start and model_start != contract_start:
         _callout(
@@ -1183,10 +1209,24 @@ def emit_cannot_get(ctx: Any, captures: dict[str, Capture]) -> None:
         "something this report re-tested.",
     )
 
-    _md("### 6.2 Absent by design — full history, podcast plays, listening duration")
-    rows_total, with_duration = ctx.rows(
-        "select count(*), count(ms_played) from {mart}.fct_play_event"
+    _md("### 6.2 What the API cannot give, and what fills it")
+    _md(
+        "Each gap in the API, the evidence for it, and what now fills it — or a plain statement "
+        "that nothing does. The API figures and the export figures are measured in this run."
+    )
+    api_rows, api_with_ms = ctx.rows(
+        "select count(*), count(ms_played) from {mart}.fct_play_event where source_system = 'api'"
     )[0]
+    export_rows, export_with_ms, episodes, chapters, export_first = ctx.rows(
+        "select count(*), count(f.ms_played), count(*) filter (where c.content_type = 'episode'), "
+        "count(*) filter (where c.content_type = 'audiobook_chapter'), min(f.ended_at_utc) "
+        "from {mart}.fct_play_event f join {mart}.dim_content c using (content_key) "
+        "where f.source_system = 'export'"
+    )[0]
+    artist_records = captures["5.1"].parts[0].records if "5.1" in captures else []
+    with_genres = sum(1 for record in artist_records if "genres" in record)
+    first = f"{export_first:%Y-%m-%d}" if export_first else "no export loaded"
+    ms_share = f"{100 * export_with_ms / export_rows:.2f}%" if export_rows else "n/a"
     types = ctx.rows(
         "select coalesce(i.value -> 'track' ->> 'type', 'missing'), count(*) "
         "from raw.api_response r "
@@ -1201,41 +1241,63 @@ def emit_cannot_get(ctx: Any, captures: dict[str, Capture]) -> None:
         pd.DataFrame(
             [
                 {
-                    "missing": "Full listening history",
-                    "evidence": "Following recently-played's `next` returned 0 items and "
-                    "`next = null` while 14 older plays were demonstrably available "
-                    "a day earlier.",
+                    "the API cannot give": "Full listening history",
+                    "evidence": "At most 50 recent plays per call (§4.5), and paging backward "
+                    "did not reach older ones (last row).",
                     "measured": "R-018 (not re-run: it costs calls and changes nothing)",
-                    "only source": "Extended Streaming History export",
+                    "what fills it": f"**The export supplies it**: {export_rows} plays from "
+                    f"{first} (§8)",
                 },
                 {
-                    "missing": "Podcast plays",
+                    "the API cannot give": "Podcast plays",
                     "evidence": f"Item types across all {captures_count} stored "
                     f"recently-played responses — {type_text}.",
                     "measured": "this run (warehouse)",
-                    "only source": "Extended Streaming History export",
+                    "what fills it": f"**The export supplies them**: {episodes} episode plays, "
+                    f"plus {chapters} audiobook chapters (§8, §10.1)",
                 },
                 {
-                    "missing": "Listening duration (ms_played)",
-                    "evidence": f"{with_duration} of {rows_total} fct_play_event rows "
-                    "carry ms_played.",
+                    "the API cannot give": "Listening duration (ms_played)",
+                    "evidence": f"{api_with_ms} of {api_rows} API plays carry ms_played.",
                     "measured": "this run (warehouse)",
-                    "only source": "Extended Streaming History export",
+                    "what fills it": f"**The export supplies it**: ms_played on {export_with_ms} "
+                    f"of {export_rows} export plays ({ms_share})",
                 },
                 {
-                    "missing": "Batch artist lookup",
-                    "evidence": "`GET /artists?ids=` returned HTTP 403 in development mode.",
-                    "measured": "R-004 (not re-run)",
-                    "only source": "one `GET /artists/{id}` per artist",
+                    "the API cannot give": "Artist genres",
+                    "evidence": f"{with_genres} of {len(artist_records)} stored artist responses "
+                    "carry a `genres` key; R-004 found 0 of 55 across three endpoints.",
+                    "measured": "this run (warehouse), and R-004",
+                    "what fills it": "**Still absent.** MusicBrainz supplies the substitute, "
+                    "by ISRC (§9, R-024)",
+                },
+                {
+                    "the API cannot give": "Batch lookups",
+                    "evidence": "`GET /artists?ids=` and `GET /tracks?ids=` both returned 403, "
+                    "each against a working single-id control.",
+                    "measured": "R-004 and R-037 (not re-run)",
+                    "what fills it": "**Still closed.** One `GET /artists/{id}` or "
+                    "`GET /tracks/{id}` per id (CLAUDE.md §4)",
+                },
+                {
+                    "the API cannot give": "Backward paging on recently-played",
+                    "evidence": "Page 1's `next` carried `before=` at page 1's oldest play; "
+                    "following it returned 0 items and `next = null` while 14 older plays "
+                    "existed in `raw`.",
+                    "measured": "R-018, scoped: one page past the first, one account, one date, "
+                    "cursor taken from `next`. It says nothing about `before` values chosen "
+                    "independently, other accounts or other days.",
+                    "what fills it": "**Still impossible within that scope.** Only the export "
+                    "reaches further back",
                 },
             ]
         )
     )
     _callout(
         "CAUTION",
-        f"**No listening time from the API.** `ms_played` is NULL on "
-        f"{rows_total - with_duration} of {rows_total} plays, by contract: any figure that sums "
-        "time listened is empty for API data, not zero.",
+        f"**No listening time from the API.** `ms_played` is NULL on {api_rows - api_with_ms} of "
+        f"{api_rows} API plays, by contract. Every figure that sums time listened comes from the "
+        "export's rows.",
     )
 
     _md("### 6.3 Field-level deprecations")

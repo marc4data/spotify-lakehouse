@@ -27,10 +27,12 @@ from spotify_lakehouse.config import (
     session,
     stg_schema,
 )
-from spotify_lakehouse.db import connect, refresh_lock
+from spotify_lakehouse.db import connect, try_advisory_lock
 
 # Slower than the poller's pacing: a notebook makes a burst of calls and must not 429 halfway.
 API_MIN_INTERVAL_SECONDS = 1.5
+# The notebook's own lock, never spot_refresh (R-042): see NotebookContext.api.
+NOTEBOOK_LOCK_NAME = "spot_notebook"
 
 # Marc's standing preference for DataFrame tables in notebooks (light, print-friendly).
 TABLE_CSS = """
@@ -83,20 +85,33 @@ class NotebookContext:
 
     @contextmanager
     def api(self) -> Iterator[SpotifyClient]:
-        """A paced Spotify client, holding the `spot_refresh` lock so the poller skips meanwhile."""
+        """A paced Spotify client under the notebook's own `spot_notebook` lock (R-042, R-041 F3).
+
+        Not `spot_refresh`: the poller takes that lock without waiting and skips when it is held, so
+        a notebook holding it for a sampling burst made polls skip, and recently-played keeps only
+        50 items. Nor `spot_refresh` per call: a poll landing during one call, or during a
+        Retry-After sleep of up to 120 s, would still skip. Running beside the poller costs one
+        overlapping call every 30 minutes, the same trade `resolve-tracks` already makes.
+        """
         run_id = f"notebook-{self.session}-{self.started_at:%Y%m%dT%H%M%S}"
-        with (
-            refresh_lock(self.conn),
-            SpotifyClient.for_profile(
-                self.profile,
-                self.settings,
-                min_interval=API_MIN_INTERVAL_SECONDS,
-                on_rate_limited=rate_limits.recorder(
-                    self.conn, run_id=run_id, command="notebook", profile=self.profile
-                ),
-            ) as client,
-        ):
-            yield client
+        with try_advisory_lock(self.conn, NOTEBOOK_LOCK_NAME) as acquired:
+            if not acquired:
+                raise ConfigError(
+                    f"Another notebook holds the {NOTEBOOK_LOCK_NAME} lock and is calling Spotify. "
+                    "Fix: let it finish, then re-run this cell."
+                )
+            with self._client(run_id) as client:
+                yield client
+
+    def _client(self, run_id: str) -> SpotifyClient:
+        return SpotifyClient.for_profile(
+            self.profile,
+            self.settings,
+            min_interval=API_MIN_INTERVAL_SECONDS,
+            on_rate_limited=rate_limits.recorder(
+                self.conn, run_id=run_id, command="notebook", profile=self.profile
+            ),
+        )
 
     def close(self) -> None:
         self.conn.close()

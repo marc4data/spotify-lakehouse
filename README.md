@@ -58,7 +58,7 @@ untracked work.
 | `make dbt-parse` | `dbt parse` with `SPOT_SESSION` from `.session` |
 | `make test`, `make lint` | pytest; ruff check + format check |
 | `make notebook` | Start Jupyter Lab (`uv run jupyter lab`) to open and run notebooks interactively |
-| `make report-01` | Execute `notebooks/01_api_inventory.ipynb`, render it to `reports/01_api_inventory.html`, strip its outputs again |
+| `make report-01` | Execute `notebooks/01_data_inventory.ipynb` (API, export, MusicBrainz, warehouse), render it to `reports/01_data_inventory.html`, strip its outputs again |
 | `make worktree NAME=wtc` / `make worktree-remove NAME=wtc` | Create and provision / remove a parallel worktree (see "New worktree") |
 
 ## Notebooks and reports

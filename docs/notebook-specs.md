@@ -3,9 +3,9 @@
 Two notebooks, both rendered through **nb2report** into standalone HTML.
 
 ```bash
-uv run nb2report notebooks/01_api_inventory.ipynb \
+uv run nb2report notebooks/01_data_inventory.ipynb \
   --author "Marc Alexander" \
-  -o reports/01_api_inventory.html
+  -o reports/01_data_inventory.html
 ```
 
 `reports/` is gitignored. Notebooks are committed with outputs stripped.
@@ -43,15 +43,17 @@ standalone without the package is a notebook that has credentials in it.**
 
 ---
 
-## 1. `01_api_inventory.ipynb` — what the API actually gives us
+## 1. `01_data_inventory.ipynb` — every source this project can reach
 
-**Purpose:** a complete, honest inventory of every table reachable from the Spotify Web API, with a
-real sample of each, so the breadth (and the holes) are visible in one document.
+**Purpose:** a complete, honest inventory of every table reachable from the Spotify Web API, the
+Extended Streaming History export and MusicBrainz, and of the warehouse built from them, with a real
+sample of each, so the breadth (and the holes) are visible in one document. Renamed from
+`01_api_inventory.ipynb` by R-042: when it was written, "reachable" meant only the API.
 
 **Heading hierarchy — this is the contract:**
 
 ```
-# Spotify Web API — Data Inventory                    (H1: report title)
+# Spotify Lakehouse — Data Inventory                  (H1: report title)
   [intro prose: what this is, when it was run, which profile, the 5-user and Nov-2024 caveats]
 
 ## 1. Identity & Account                              (H2: domain)
@@ -80,19 +82,36 @@ real sample of each, so the breadth (and the holes) are visible in one document.
                                                        span vs api_coverage_start; what needs the export)
 
 ## 5. Catalog Enrichment
-### 5.1 /artists/{id} — Artist (incl. deprecated `genres`)
+### 5.1 /artists/{id} — Artist (`genres` absent)      (R-042: absent, not deprecated — 448 of 448 objects)
 ### 5.2 /albums/{id} — Album
 ### 5.3 /tracks/{id} — Track
 ### 5.4 /shows/{id} & /episodes/{id} — Podcasts
 ### 5.5 /search — Catalog Search
 
-## 6. What We Cannot Get                               (H2: the negative space)
+## 6. What the API Cannot Give                         (H2: the negative space, and what fills it)
 ### 6.1 Removed endpoints (Nov 2024)
-### 6.2 Absent by design — full history, podcast plays, listening duration
+### 6.2 What the API cannot give, and what fills it   (rewritten R-042: each gap names its filler or
+                                                       states that nothing fills it)
 ### 6.3 Field-level deprecations
 
 ## 7. Coverage Summary                                 (H2)
-   [one table: endpoint × reachable? × rows sampled × fields × feeds which warehouse table]
+   [one table: API endpoint × reachable? × rows sampled × fields × feeds which warehouse table]
+
+## 8. The Extended Streaming History Export            (added R-042. Each H3 below carries the same four
+                                                       H4s, "Table & source" in place of "Endpoint & scope")
+### 8.1 raw.export_record — one row per export record  [key census, per-file counts and dates, content types]
+### 8.2 stg_export__play_record — the export, typed
+
+## 9. MusicBrainz                                      (added R-042)
+### 9.1 raw.external_response — MusicBrainz `isrc_lookup`
+### 9.2 raw.external_response — MusicBrainz `artist`, and the `genre` / `tag` split
+
+## 10. The Warehouse                                   (added R-042)
+### 10.1 fct_play_event — one row per play             [by source_system and content_type]
+### 10.2 dim_content — track, episode, audiobook chapter  [resolved vs unresolved]
+### 10.3 dim_artist — SCD Type 2 on sourced genres
+### 10.4 dim_genre and br_artist_genre
+### 10.5 The allocation reconciliation — four steps and their residuals
 ```
 
 **Sections 6 and 7 are not optional and not filler.** Section 6 is the single most useful page in the
@@ -141,7 +160,7 @@ Section 7 is the map from API surface to warehouse model.
 
 ## 4. Genre Spread
 ### 4.1 Allocation reconciliation                     [MANDATORY FIRST. total → music →
-                                                       artist-resolved → genre-allocated ms, with
+                                                       artist-identified → genre-allocated ms, with
                                                        the unclassified residual named. A radar
                                                        chart without this is decoration.]
 ### 4.2 Current spread                                [radar, trailing 12 months, 13 buckets]

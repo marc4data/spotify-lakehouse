@@ -1,6 +1,8 @@
 -- Spotify artist-object coverage, reported beside the allocation chain and not inside it (data-contracts §4,
--- spot-main-R-041). The GET /artists/{id} response carries the artist's name, which every top-artists view
--- needs, but no genre (CLAUDE.md §4), so it gates no allocation step. One row per profile, over music plays.
+-- spot-main-R-041). The GET /artists/{id} response carries no genre (CLAUDE.md §4) and gates no allocation
+-- step. Nor does it supply names: those come from the track and album credit objects, which carry every key
+-- the artist response has except `images` (R-041 F2, F7: 438 of 438 names identical). What the fetch adds is
+-- `images`, and nothing else this project uses. One row per profile, over music plays.
 with music as (
     select
         plays.profile_slug,

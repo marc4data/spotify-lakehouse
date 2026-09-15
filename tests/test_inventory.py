@@ -111,7 +111,7 @@ def test_playlist_items_refusal_falls_back_to_tracks_route_and_records_both() ->
     }
     requested: list[str] = []
     with _client(routes, requested) as api:
-        captures = inventory.collect_live(api, album_id=None, track_id=None)
+        captures = inventory.collect_live(api, album_id=None)
     capture = captures["3.2"]
     assert [part.ok for part in capture.parts] == [False, True]
     assert capture.parts[0].status.startswith("HTTP 403")
@@ -124,7 +124,7 @@ def test_an_unsafe_id_from_a_response_is_never_placed_in_a_path() -> None:
     routes = {"/me/playlists": httpx.Response(200, json={"items": [{"id": "../../me/player"}]})}
     requested: list[str] = []
     with _client(routes, requested) as api:
-        captures = inventory.collect_live(api, album_id="../x", track_id=None)
+        captures = inventory.collect_live(api, album_id="../x")
     assert not captures["3.2"].ok
     assert captures["3.2"].parts[0].status.startswith("not requested")
     assert captures["5.2"].parts[0].status.startswith("not requested")
@@ -134,7 +134,7 @@ def test_an_unsafe_id_from_a_response_is_never_placed_in_a_path() -> None:
 def test_live_errors_are_captured_not_raised_and_counted_in_coverage() -> None:
     requested: list[str] = []
     with _client({}, requested) as api:
-        captures = inventory.collect_live(api, album_id="a1", track_id="t1")
+        captures = inventory.collect_live(api, album_id="a1")
     assert not captures["2.1"].ok
     coverage = inventory.coverage_frame(captures).set_index("section")
     assert coverage.loc["2.1", "reachable"].startswith("no: HTTP 404")
@@ -142,3 +142,28 @@ def test_live_errors_are_captured_not_raised_and_counted_in_coverage() -> None:
     counts = inventory.coverage_counts(captures)
     assert counts["not sampled"] == len(inventory.SPECS)
     assert counts["live calls"] == len(requested)
+
+
+def test_live_sampling_never_calls_tracks_or_artists() -> None:
+    """R-042: both are extracted, so the notebook reads them from the warehouse."""
+    requested: list[str] = []
+    with _client({}, requested) as api:
+        captures = inventory.collect_live(api, album_id="a1")
+    assert requested  # it did sample the surfaces that are not extracted
+    assert [path for path in requested if path.startswith(("/tracks", "/artists"))] == []
+    assert "5.1" not in captures and "5.3" not in captures
+
+
+# Claims the notebook once made and the warehouse disproved (R-042): `genres` is absent, not
+# deprecated (448 of 448 objects), and the export supplies full history, podcasts and duration.
+DISPROVED_CLAIMS = ("Absent by design", "deprecated `genres`", "incl. deprecated")
+
+
+def test_no_section_repeats_a_disproved_claim() -> None:
+    import inspect
+
+    from spotify_lakehouse import data_inventory
+
+    headings = " ".join(spec.heading for spec in inventory.SPECS)
+    source = inspect.getsource(inventory) + inspect.getsource(data_inventory) + headings
+    assert [claim for claim in DISPROVED_CLAIMS if claim in source] == []

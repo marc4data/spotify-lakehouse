@@ -16,7 +16,7 @@ help:
 	@echo "load-export PROFILE=marc   unzip + load that profile's Extended Streaming History (re-run inserts 0)"
 	@echo "resolve-tracks PROFILE=marc  DRY RUN: count export tracks still to look up (add --run via uv run spot)"
 	@echo "notebook     start Jupyter Lab (uv run jupyter lab)"
-	@echo "report-01    execute and render notebooks/01_api_inventory.ipynb to reports/"
+	@echo "report-01    execute and render notebooks/01_data_inventory.ipynb to reports/"
 	@echo "worktree NAME=wtc          create ../spotify-wtc, bootstrap it, print what it provisioned"
 	@echo "worktree-remove NAME=wtc   remove it, delete its branch if merged, drop its schemas"
 	@echo "test / lint / format"
@@ -68,12 +68,12 @@ resolve-tracks:
 NB2REPORT ?= ../nb2report
 report-01:
 	uv run jupyter nbconvert --to notebook --execute --inplace \
-		--ExecutePreprocessor.timeout=600 notebooks/01_api_inventory.ipynb
+		--ExecutePreprocessor.timeout=600 notebooks/01_data_inventory.ipynb
 	mkdir -p reports
-	uv run --with-editable $(NB2REPORT) nb2report notebooks/01_api_inventory.ipynb \
-		--author "Marc Alexander" --toc-depth 3 -o reports/01_api_inventory.html
-	uv run nbstripout notebooks/01_api_inventory.ipynb
-	@echo "Report: reports/01_api_inventory.html (notebook outputs stripped again)"
+	uv run --with-editable $(NB2REPORT) nb2report notebooks/01_data_inventory.ipynb \
+		--author "Marc Alexander" --toc-depth 3 -o reports/01_data_inventory.html
+	uv run nbstripout notebooks/01_data_inventory.ipynb
+	@echo "Report: reports/01_data_inventory.html (notebook outputs stripped again)"
 
 notebook:
 	uv run jupyter lab
