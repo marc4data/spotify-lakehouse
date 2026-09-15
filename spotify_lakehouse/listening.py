@@ -1247,7 +1247,7 @@ def emit_bucket_radar(ctx: Any, plays: pd.DataFrame, cov: Coverage) -> None:
         )
     _md("**The underlying time**, bucket by bucket in the chart's order (spokes run clockwise).")
     table = shares.assign(
-        allocated_ms=shares["allocated_ms"].round(0),
+        allocated_ms=shares["allocated_ms"].round(0).astype("Int64"),
         hours=shares["hours"].round(1),
         share_pct=shares["share_pct"].round(2),
         allocated_plays=shares["allocated_plays"].round(1),
@@ -1351,19 +1351,17 @@ def _drilldown_figure(buckets: list[str], periods: list[tuple[str, pd.DataFrame]
                 visible=index == 0,
             )
         )
+    # The menu names the period, so the title is static and sits right, clear of the menu (R-015).
     buttons = [
         {
             "label": label,
-            "method": "update",
-            "args": [
-                {"visible": [i == j for j in range(len(periods))]},
-                {"title": {"text": f"Allocated music time: {label}"}},
-            ],
+            "method": "restyle",
+            "args": [{"visible": [i == j for j in range(len(periods))]}],
         }
         for i, (label, _) in enumerate(periods)
     ]
     figure.update_layout(
-        title={"text": f"Allocated music time: {periods[0][0]}"},
+        title={"text": "Allocated music time", "x": 0.98, "xanchor": "right"},
         updatemenus=[
             {
                 "buttons": buttons,
