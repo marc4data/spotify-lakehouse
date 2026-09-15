@@ -189,12 +189,18 @@ def _fetched_keys(conn: psycopg.Connection, feed: str) -> set[str]:
 
 
 def isrcs_to_fetch(conn: psycopg.Connection) -> list[str]:
-    """ISRCs on tracks in raw recently-played with no MusicBrainz lookup stored yet."""
+    """ISRCs on tracks in raw (recently-played items and resolved export tracks, R-037) with no
+    MusicBrainz lookup stored yet."""
     referenced: set[str] = set()
-    for (payload,) in conn.execute(
-        "select payload from raw.api_response where feed = 'recently_played'"
+    for feed, payload in conn.execute(
+        "select feed, payload from raw.api_response where feed in ('recently_played', 'track')"
     ):
-        referenced |= isrcs_from_recently_played(payload)
+        if feed == "track":
+            isrc = normalize_isrc((payload.get("external_ids") or {}).get("isrc"))
+            if isrc:
+                referenced.add(isrc)
+        else:
+            referenced |= isrcs_from_recently_played(payload)
     return sorted(referenced - _fetched_keys(conn, ISRC_FEED))
 
 

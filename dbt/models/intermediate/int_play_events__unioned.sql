@@ -1,10 +1,8 @@
 -- Every play-event candidate from every source, before deduplication (data-contracts §2).
 -- raw_response_id / item_ordinal address the row in its own raw table: raw.api_response for api rows,
 -- raw.export_record (id, record_index) for export rows. They order ties, nothing more.
---
--- Export audiobook chapters are NOT unioned: dim_content's contract types content as track | episode
--- (§3), so a chapter play has no contracted home. They stay in raw and staging, counted in the R-003
--- report, until Cowork extends the supertype.
+-- Audiobook chapters are plays too (R-037 amended §3's supertype): total listening that omits a content
+-- type is not total.
 with api as (
     select
         profile_slug,
@@ -49,7 +47,7 @@ export as (
         raw_record_id as raw_response_id,
         record_index as item_ordinal
     from {{ ref('stg_export__play_record') }}
-    where content_type in ('track', 'episode')
+    where content_type in ('track', 'episode', 'audiobook_chapter')
 )
 
 select * from api

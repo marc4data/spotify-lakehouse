@@ -3,7 +3,7 @@ CONFIG_DIR ?= $(HOME)/.config/spot
 COMPOSE := docker compose --env-file $(CONFIG_DIR)/.env
 
 .PHONY: help bootstrap db-up db-down migrate dbt-parse dbt-build dbt-test dbt-profile test lint format \
-	launchd-install launchd-uninstall refresh-status musicbrainz load-export report-01 notebook worktree worktree-remove
+	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 notebook worktree worktree-remove
 
 help:
 	@echo "bootstrap    one command to make this checkout fully operational (idempotent)"
@@ -14,6 +14,7 @@ help:
 	@echo "dbt-profile  append the spot profile to ~/.dbt/profiles.yml (backs it up first)"
 	@echo "musicbrainz  fetch MusicBrainz genres and tags for every ISRC in raw (resumable, ~1 req/s)"
 	@echo "load-export PROFILE=marc   unzip + load that profile's Extended Streaming History (re-run inserts 0)"
+	@echo "resolve-tracks PROFILE=marc  DRY RUN: count export tracks still to look up (add --run via uv run spot)"
 	@echo "notebook     start Jupyter Lab (uv run jupyter lab)"
 	@echo "report-01    execute and render notebooks/01_api_inventory.ipynb to reports/"
 	@echo "worktree NAME=wtc          create ../spotify-wtc, bootstrap it, print what it provisioned"
@@ -56,6 +57,11 @@ musicbrainz:
 
 load-export:
 	uv run spot load-export --profile "$(PROFILE)"
+
+# Dry run only: prints how many GET /tracks/{id} calls a real run would make. Running them is deliberate:
+#   uv run spot resolve-tracks --profile marc --run [--limit N]
+resolve-tracks:
+	uv run spot resolve-tracks --profile "$(PROFILE)"
 
 # nb2report is attached per run from a local checkout, never recorded in uv.lock: a path dependency
 # in the lock breaks `uv sync --locked` for anyone without that sibling directory, CI included (R-008).

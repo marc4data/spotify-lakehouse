@@ -32,13 +32,17 @@ def test_scrub_leaves_other_endpoints_alone() -> None:
         ("/me", "me"),
         ("/me/player/recently-played", "recently_played"),
         ("/artists/0abc123XYZ", "artist"),
+        ("/tracks/0abc123XYZ", "track"),
     ],
 )
 def test_feed_for_endpoint(endpoint: str, feed: str) -> None:
     assert raw_store.feed_for_endpoint(endpoint) == feed
 
 
-@pytest.mark.parametrize("endpoint", ["/me/top/artists", "/artists", "/artists/a/b", "/playlists"])
+@pytest.mark.parametrize(
+    "endpoint",
+    ["/me/top/artists", "/artists", "/artists/a/b", "/playlists", "/tracks", "/tracks/a/b"],
+)
 def test_unknown_endpoint_has_no_feed(endpoint: str) -> None:
     with pytest.raises(ValueError, match="No feed is defined"):
         raw_store.feed_for_endpoint(endpoint)

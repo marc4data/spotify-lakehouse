@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import structlog
 
-from spotify_lakehouse import auth, export, migrate, musicbrainz, poller, profiles
+from spotify_lakehouse import auth, export, migrate, musicbrainz, poller, profiles, tracks
 from spotify_lakehouse.api import SpotifyApiError, SpotifyClient
 from spotify_lakehouse.artists import artist_ids_to_fetch
 from spotify_lakehouse.config import ConfigError, load_settings, musicbrainz_contact, session
@@ -264,6 +264,52 @@ def cmd_resolve_musicbrainz(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resolve_tracks(args: argparse.Namespace) -> int:
+    profile = auth.validate_slug(args.profile)
+    settings = load_settings()
+    run_id = f"tracks-{session()}-{uuid.uuid4().hex[:8]}"
+    with (
+        connect(settings, autocommit=True) as conn,
+        try_advisory_lock(conn, tracks.LOCK_NAME) as acquired,
+    ):
+        if not acquired:
+            print(
+                f"spot resolve-tracks: the {tracks.LOCK_NAME} lock is held elsewhere",
+                file=sys.stderr,
+            )
+            return 1
+        pending = len(tracks.track_ids_to_fetch(conn))
+        calls = pending if args.limit is None else min(args.limit, pending)
+        hours = calls * tracks.SECONDS_PER_CALL_ESTIMATE / 3600
+        print(
+            f"spot resolve-tracks  profile={profile}  unresolved export track ids: {pending}  "
+            f"this run: {calls} GET /tracks/{{id}} call(s), ~{hours:.1f} h at 1 call/s"
+        )
+        if not args.run:
+            print(
+                "dry run: no API call made. Batch GET /tracks?ids= returns 403 to this app "
+                "(R-037), so every id is one call. Add --run to make them."
+            )
+            return 0
+        with SpotifyClient.for_profile(profile, settings) as api:
+            summary = tracks.resolve(api, conn, profile, run_id, limit=args.limit)
+    print(
+        f"to fetch {summary.to_fetch}: resolved {summary.resolved}, not found {summary.not_found}, "
+        f"failed {summary.failed} (retried next run), relinked {summary.relinked}"
+    )
+    return 0
+
+
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a whole number, got {value!r}") from exc
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {number}")
+    return number
+
+
 def cmd_load_export(args: argparse.Namespace) -> int:
     profile = auth.validate_slug(args.profile)
     profile_dir = export.exports_dir() / profile
@@ -445,6 +491,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--refresh", action="store_true", help="re-observe artists that already have a response"
     )
     p_artists.set_defaults(func=cmd_extract_artists)
+
+    p_tracks = sub.add_parser(
+        "resolve-tracks",
+        help="GET /tracks/{id} for export track URIs; a dry run (count and estimate) unless --run",
+    )
+    p_tracks.add_argument("--profile", required=True, help="profile whose token makes the calls")
+    p_tracks.add_argument(
+        "--run", action="store_true", help="make the calls (one per track, ~1/s; resumable)"
+    )
+    p_tracks.add_argument(
+        "--limit", type=_positive_int, default=None, help="look up at most N ids this run"
+    )
+    p_tracks.set_defaults(func=cmd_resolve_tracks)
 
     p_export = sub.add_parser(
         "load-export",

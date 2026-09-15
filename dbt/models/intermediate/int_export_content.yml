@@ -2,7 +2,7 @@ version: 2
 
 models:
   - name: int_export_content
-    description: One row per track or episode URI in any export, with its latest export metadata (R-003).
+    description: One row per track, episode or audiobook chapter URI in any export, with its latest export metadata (R-003).
     columns:
       - name: content_uri
         tests: [unique, not_null]

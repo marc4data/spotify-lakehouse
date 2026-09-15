@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: stg_spotify__track
+    description: One row per GET /tracks/{id} response for an export track URI (R-037).
+    columns:
+      - name: raw_response_id
+        tests: [unique, not_null]
+      - name: content_uri
+        tests: [not_null]

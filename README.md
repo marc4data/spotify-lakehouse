@@ -51,6 +51,7 @@ untracked work.
 |---|---|
 | `uv run spot auth <profile>` | OAuth Authorization Code login at `http://127.0.0.1:3000` |
 | `uv run spot probe --profile <p> [--shape]` | `GET /me` + `GET /me/player/recently-played`; writes `data/raw/` and `raw.api_response` |
+| `uv run spot resolve-tracks --profile <p> [--run] [--limit N]` / `make resolve-tracks PROFILE=<p>` (dry run) | `GET /tracks/{id}` for export track URIs so their plays reach an artist and an ISRC. **Dry run unless `--run`**: batch `GET /tracks?ids=` is 403 to this app, so it is one call per track (~13 h for ~47k). Resumable. |
 | `uv run spot load-export --profile <p>` / `make load-export PROFILE=<p>` | Unzip `~/spot-data/exports/<p>/*.zip` beside itself (never overwriting) and load Extended Streaming History into `raw.export_record`; `ip_addr`/`user_agent` discarded before insert; re-run inserts 0 |
 | `uv run spot resolve-musicbrainz` / `make musicbrainz` | ISRC → MusicBrainz recording → primary artist genres and tags into `raw.external_response`; resumable (skips every id already stored); needs `MUSICBRAINZ_CONTACT` in `~/.config/spot/.env` |
 | `uv run spot migrate` / `make migrate` | Apply raw migrations; create this session's schemas |

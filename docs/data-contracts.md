@@ -70,20 +70,26 @@ returns but does not document (F8). Nothing in the model needs it.
 The export and the API overlap. Once a refreshed export arrives, every play it covers is already in
 the warehouse from the poller.
 
-**Natural key: `(profile_key, content_uri, date_trunc('minute', ended_at_utc))`.**
+**Natural key, by source pair (amended R-037):**
 
-Minute truncation, not second: the export records stream *end* and the API's `played_at` is
-independently recorded, and they do not agree to the second.
+| Pair | Key | Why |
+|---|---|---|
+| export vs export | `(profile_key, content_uri, ended_at_utc)`: **second precision** | Two export rows come from one clock (stream end), so there is no disagreement to absorb; truncating them only collapses genuine plays. |
+| export vs api | `(profile_key, content_uri, date_trunc('minute', ended_at_utc))` | The export records stream *end* and the API's `played_at` is recorded independently; they do not agree to the second. This pair is what minute truncation was written for. |
+| api vs api | `(profile_key, content_uri, date_trunc('minute', ended_at_utc))` | Unchanged: one play captured by several polls. |
 
-**Precedence: `export` beats `api`, always.** When both sources produce a row for one natural key,
+**Precedence: `export` beats `api`, always.** When an api row shares a minute key with an export row,
 keep the export row and discard the API row entirely — do not merge fields. The export row is
 strictly richer.
 
-> [!WARNING]
-> Minute-truncation will collapse two genuine plays of the same track in the same minute into one.
-> This is a real and accepted loss. A track under 60 seconds played twice back-to-back counts once.
-> **Quantify it before accepting it:** the round that builds this reports how many export rows share
-> a natural key with another export row. If that number is material, the contract changes.
+> [!NOTE]
+> **Quantified, judged material, changed.** Under the former single minute key, R-003 measured **4,011
+> export rows collapsed (2.258%)**, 6,337 sharing a key (3.567%), 61.5 h of `ms_played`, 1,023 collapsed
+> rows played ≥ 30 s. Cowork judged that material (R-037). At second precision **2,794 of those rows come
+> back** (33,572,697 ms; 182 of them ≥ 30 s). **1,217 rows still collapse**: export records identical to the
+> second are indistinguishable, so collapsing them is correct. Minute truncation still merges two genuine
+> API plays of one track in one minute; the API carries no duration, so that loss cannot be measured from
+> the API alone.
 
 ### The `ms_played` hole
 
@@ -145,7 +151,7 @@ split requires a union at query time in every single query.
 |---|---|
 | `content_key` | Surrogate. |
 | `content_uri` | Natural key. `spotify:track:…` or `spotify:episode:…`. |
-| `content_type` | `track` \| `episode`. |
+| `content_type` | `track` \| `episode` \| `audiobook_chapter` (R-037: a third subtype of listening, on the not-music side). |
 | `content_name` | Track or episode name. |
 | `parent_name` | Album name for tracks; show name for episodes. |
 | `primary_creator_name` | Album artist for tracks; show publisher for episodes. |
@@ -181,7 +187,7 @@ not-yet-resolved-but-pending.
 
 **Unknown-member attribute values are part of the domain, not an exception to it (C3, R-004).** Enumerate
 them in the accepted-values tests rather than letting a row carry a value the contract forbids:
-`dim_content.content_type` ∈ {`track`, `episode`, `unknown`}; `dim_profile.profile_slug` unknown member is
+`dim_content.content_type` ∈ {`track`, `episode`, `audiobook_chapter`, `unknown`}; `dim_profile.profile_slug` unknown member is
 `(unknown)`; `dim_time_of_day.daypart` gains `unknown`. A dimension whose unknown row violates its own
 enumeration is a contract that cannot pass its own test.
 

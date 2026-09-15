@@ -1,13 +1,21 @@
 -- One row per artist id: every artist credited on a track or album, whether or not GET /artists/{id}
 -- has been called for it. Name prefers the artist's own response; `is_fetched` records whether one exists.
-with referenced as (
+-- Credits come from recently-played items and, since R-037, GET /tracks/{id} lookups of export URIs.
+with credited_tracks as (
+    select track_artists, album_artists, ingested_at from {{ ref('stg_spotify__recently_played') }}
+    union all
+    select track_artists, album_artists, ingested_at from {{ ref('stg_spotify__track') }}
+),
+
+referenced as (
     select
         artist.value ->> 'id' as artist_id,
         artist.value ->> 'uri' as artist_uri,
         artist.value ->> 'name' as artist_name,
-        plays.ingested_at
-    from {{ ref('stg_spotify__recently_played') }} as plays
-    cross join lateral jsonb_array_elements(plays.track_artists || plays.album_artists) as artist (value)
+        credited_tracks.ingested_at
+    from credited_tracks
+    cross join lateral jsonb_array_elements(credited_tracks.track_artists || credited_tracks.album_artists)
+        as artist (value)
     where artist.value ->> 'id' is not null
 ),
 

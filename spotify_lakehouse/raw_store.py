@@ -24,6 +24,7 @@ FEEDS_BY_ENDPOINT: dict[str, str] = {
     "/me/player/recently-played": "recently_played",
 }
 ARTIST_ENDPOINT = re.compile(r"/artists/[A-Za-z0-9]+")
+TRACK_ENDPOINT = re.compile(r"/tracks/[A-Za-z0-9]+")  # R-037
 FEED_NAME = re.compile(r"[a-z][a-z0-9_]*")
 FILE_KEY = re.compile(r"[A-Za-z0-9]+")
 
@@ -44,6 +45,8 @@ def feed_for_endpoint(endpoint: str) -> str:
         return FEEDS_BY_ENDPOINT[endpoint]
     if ARTIST_ENDPOINT.fullmatch(endpoint):
         return "artist"
+    if TRACK_ENDPOINT.fullmatch(endpoint):
+        return "track"
     raise ValueError(f"No feed is defined for {endpoint!r}; add it to raw_store.FEEDS_BY_ENDPOINT.")
 
 

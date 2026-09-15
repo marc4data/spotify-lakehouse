@@ -46,7 +46,7 @@ steps as (
     from flagged
     union all
     select profile_slug, 2, 'music',
-        in_music, in_total and not in_music, 'not_music (episodes and unknown content)', ms_played
+        in_music, in_total and not in_music, 'not_music (episodes, audiobook chapters and unknown content)', ms_played
     from flagged
     union all
     select profile_slug, 3, 'artist_resolved',

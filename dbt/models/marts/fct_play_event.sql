@@ -32,10 +32,11 @@ localized as (
 )
 
 select
-    -- Stable 64-bit surrogate from the natural key, so a rebuild never renumbers events.
+    -- Stable 64-bit surrogate from (profile, content, second), so a rebuild never renumbers events.
+    -- Second, not minute, since R-037: export rows are distinct to the second (data-contracts §2).
     ('x' || substr(md5(
         profile_slug || '|' || content_uri || '|'
-        || to_char(date_trunc('minute', ended_at_utc) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI')
+        || to_char(date_trunc('second', ended_at_utc) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS')
     ), 1, 16))::bit(64)::bigint as play_event_key,
     coalesce(profile_key, -1) as profile_key,
     coalesce(content_key, -1) as content_key,

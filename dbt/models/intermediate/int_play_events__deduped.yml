@@ -3,12 +3,12 @@ version: 2
 models:
   - name: int_play_events__deduped
     description: >
-      One row per natural key (profile, content_uri, minute of ended_at_utc), export preferred over api
-      (data-contracts §2).
+      One row per play after the source-pair dedupe (data-contracts §2, R-037): export rows distinct to the
+      second, api rows to the minute, and no api row in a minute an export row holds.
     tests:
       - dbt_utils_free_unique_combination:
           arguments:
-            columns: [profile_slug, content_uri, "date_trunc('minute', ended_at_utc)"]
+            columns: [profile_slug, content_uri, ended_at_utc]
 
 unit_tests:
   - name: dedupe_collapses_same_minute_and_prefers_export
@@ -60,3 +60,31 @@ unit_tests:
         - {content_uri: "spotify:track:a", ended_at_utc: "2026-09-14 08:00:01+00", raw_response_id: 10}
         - {content_uri: "spotify:track:b", ended_at_utc: "2026-09-14 08:04:30+00", raw_response_id: 10}
         - {content_uri: "spotify:track:a", ended_at_utc: "2026-09-14 08:09:59+00", raw_response_id: 10}
+
+  - name: export_rows_keep_second_precision_and_still_beat_api_at_minute
+    description: >
+      spot-main-R-037, the named dedupe guard. Two export plays of one track 30 s apart are two plays (the
+      minute key used to collapse them); two export rows identical to the second are one; an api row in the
+      same minute as an export row is still discarded whole; an api row in a different minute survives.
+      Truncating the export key to the minute turns this red (e1 at 12:00:40 disappears).
+    model: int_play_events__deduped
+    given:
+      - input: ref('int_play_events__unioned')
+        rows:
+          # e1: two genuine export plays in one minute, and an api capture of the same minute
+          - {profile_slug: alpha, content_uri: "spotify:track:e1", ended_at_utc: "2026-01-01 12:00:10+00", source_system: export, ingested_at: "2026-01-09 00:00:00+00", raw_response_id: 1, item_ordinal: 0}
+          - {profile_slug: alpha, content_uri: "spotify:track:e1", ended_at_utc: "2026-01-01 12:00:40+00", source_system: export, ingested_at: "2026-01-09 00:00:00+00", raw_response_id: 2, item_ordinal: 1}
+          - {profile_slug: alpha, content_uri: "spotify:track:e1", ended_at_utc: "2026-01-01 12:00:55.123+00", source_system: api, ingested_at: "2026-01-01 13:00:00+00", raw_response_id: 90, item_ordinal: 1}
+          # e2: two export records identical to the second are indistinguishable: one play, lowest raw id kept
+          - {profile_slug: alpha, content_uri: "spotify:track:e2", ended_at_utc: "2026-01-01 12:01:00+00", source_system: export, ingested_at: "2026-01-09 00:00:00+00", raw_response_id: 4, item_ordinal: 3}
+          - {profile_slug: alpha, content_uri: "spotify:track:e2", ended_at_utc: "2026-01-01 12:01:00+00", source_system: export, ingested_at: "2026-01-09 00:00:00+00", raw_response_id: 3, item_ordinal: 2}
+          # e3: api and export in different minutes are different plays
+          - {profile_slug: alpha, content_uri: "spotify:track:e3", ended_at_utc: "2026-01-01 12:02:05+00", source_system: api, ingested_at: "2026-01-01 13:00:00+00", raw_response_id: 91, item_ordinal: 2}
+          - {profile_slug: alpha, content_uri: "spotify:track:e3", ended_at_utc: "2026-01-01 12:03:00+00", source_system: export, ingested_at: "2026-01-09 00:00:00+00", raw_response_id: 5, item_ordinal: 4}
+    expect:
+      rows:
+        - {content_uri: "spotify:track:e1", ended_at_utc: "2026-01-01 12:00:10+00", source_system: export, raw_response_id: 1}
+        - {content_uri: "spotify:track:e1", ended_at_utc: "2026-01-01 12:00:40+00", source_system: export, raw_response_id: 2}
+        - {content_uri: "spotify:track:e2", ended_at_utc: "2026-01-01 12:01:00+00", source_system: export, raw_response_id: 3}
+        - {content_uri: "spotify:track:e3", ended_at_utc: "2026-01-01 12:02:05+00", source_system: api, raw_response_id: 91}
+        - {content_uri: "spotify:track:e3", ended_at_utc: "2026-01-01 12:03:00+00", source_system: export, raw_response_id: 5}
