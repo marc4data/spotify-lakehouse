@@ -207,6 +207,7 @@ def cmd_extract_artists(args: argparse.Namespace) -> int:
     settings = load_settings()
     run_id = f"artists-{session()}-{uuid.uuid4().hex[:8]}"
     stored = 0
+    not_found = 0
     with_genres_key = 0
     with (
         connect(settings, autocommit=True) as conn,
@@ -220,7 +221,14 @@ def cmd_extract_artists(args: argparse.Namespace) -> int:
         for artist_id in artist_ids:
             endpoint = f"/artists/{artist_id}"
             feed = feed_for_endpoint(endpoint)
-            payload = api.get(endpoint)
+            try:
+                payload = api.get(endpoint)
+            except SpotifyApiError as exc:
+                if exc.status not in (400, 404):
+                    raise
+                not_found += 1  # not stored, so it stays in the fetch list and is visible next run
+                print(f"  not found: {artist_id} ({exc.status})", file=sys.stderr)
+                continue
             clean, _ = scrub(endpoint, payload)
             source_file = write_response(
                 profile, feed, clean, run_id, datetime.now(UTC), key=artist_id
@@ -228,8 +236,10 @@ def cmd_extract_artists(args: argparse.Namespace) -> int:
             insert_response(conn, clean, source_file, profile, feed)
             stored += 1
             with_genres_key += "genres" in clean
+        http_calls = api.calls
     print(
-        f"stored {stored} artist response(s) as feed=artist; with a 'genres' key: {with_genres_key}"
+        f"stored {stored} artist response(s) as feed=artist; not found {not_found}; "
+        f"with a 'genres' key: {with_genres_key}; HTTP calls sent {http_calls}"
     )
     return 0
 
@@ -256,11 +266,18 @@ def cmd_resolve_musicbrainz(args: argparse.Namespace) -> int:
         )
         with musicbrainz.MusicBrainzClient(contact) as client:
             summary = musicbrainz.resolve(client, conn, run_id)
+            calls, throttled = client.calls, client.throttled
     for name, feed in (("isrc_lookup", summary.isrc), ("artist", summary.artist)):
         print(
             f"  {name}: to fetch {feed.to_fetch}, stored {feed.found + feed.not_found} "
             f"(found {feed.found}, unknown to MusicBrainz {feed.not_found})"
         )
+    first_attempts = calls - throttled
+    rate = 100 * throttled / first_attempts if first_attempts else 0.0
+    print(
+        f"  HTTP calls sent {calls}: {first_attempts} lookups + {throttled} retries after 429/503 "
+        f"({rate:.1f}% of lookups throttled)"
+    )
     return 0
 
 
@@ -285,13 +302,14 @@ def cmd_resolve_tracks(args: argparse.Namespace) -> int:
         hours = calls * tracks.SECONDS_PER_CALL_ESTIMATE / 3600
         print(
             f"spot resolve-tracks  profile={profile}  unresolved export track ids: {pending}  "
-            f"this run: {calls} GET /tracks/{{id}} call(s), ~{hours:.1f} h at 1 call/s"
+            f"this run: {calls} GET /tracks/{{id}} call(s), ~{hours:.1f} h at the measured "
+            f"{tracks.SECONDS_PER_CALL_ESTIMATE} s/call"
         )
         checkpoints = (*tracks.COVERAGE_CHECKPOINTS, *([args.limit] if args.limit else []))
         print(
             "most-listened first. What the first N calls buy (ms_played from raw.export_record):\n"
             "  calls   % of unresolved ms_played   % of unresolved plays   "
-            "% of all export track ms_played   hours at 1 call/s"
+            f"% of all export track ms_played   hours at {tracks.SECONDS_PER_CALL_ESTIMATE} s/call"
         )
         for row in tracks.coverage_table(ranked, all_track_ms, checkpoints):
             print(

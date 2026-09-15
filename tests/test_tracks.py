@@ -148,6 +148,15 @@ def test_resolve_takes_most_listened_first_remembers_404s_and_retries_errors(
 
 
 def test_resolve_tracks_is_a_dry_run_without_run(db, monkeypatch, capsys) -> None:
+    # A real resolver run holds spot_tracks, and the dry run correctly refuses to read then
+    # (R-039 F6). That refusal is right, so it must not turn the suite red: skip, naming the lock.
+    held = db.execute("select pg_try_advisory_lock(hashtext(%s))", (tracks.LOCK_NAME,)).fetchone()
+    if not (held and held[0]):
+        pytest.skip(
+            f"the {tracks.LOCK_NAME} lock is held by a running resolver; dry run not tested"
+        )
+    db.execute("select pg_advisory_unlock(hashtext(%s))", (tracks.LOCK_NAME,))
+
     def refuse(*args, **kwargs):
         raise AssertionError("a dry run must not construct an API client")
 

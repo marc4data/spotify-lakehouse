@@ -33,7 +33,9 @@ from spotify_lakehouse.raw_store import feed_for_endpoint, insert_response, scru
 
 LOCK_NAME = "spot_tracks"
 TRACK_URI = re.compile(r"spotify:track:([A-Za-z0-9]{22})")
-SECONDS_PER_CALL_ESTIMATE = 1.0  # the client's pacing; network time comes on top
+# Measured, not configured: R-039's trial ran 1.13 s per lookup (p50 1.12, p90 1.16, max 1.42
+# over 74 samples) against the client's 1.0 s pacing, because network time comes on top (R-040 F2).
+SECONDS_PER_CALL_ESTIMATE = 1.13
 TERMINAL_STATUSES = frozenset({400, 404})
 MAX_CONSECUTIVE_FAILURES = 10
 COVERAGE_CHECKPOINTS = (100, 500, 1_000, 2_500, 5_000, 10_000, 20_000)

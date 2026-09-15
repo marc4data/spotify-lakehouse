@@ -107,6 +107,8 @@ class MusicBrainzClient:
         self._sleep = sleep
         self._clock = clock
         self._last_call: float | None = None
+        self.calls = 0  # HTTP requests actually sent, retries included (R-040)
+        self.throttled = 0  # of those, 429/503 answers that were retried
 
     def __enter__(self) -> Self:
         return self
@@ -125,11 +127,13 @@ class MusicBrainzClient:
         while True:
             self._pace()
             resp = self._http.get(path, params=params)
+            self.calls += 1
             self._last_call = self._clock()
             status = resp.status_code
             if status in (429, 503) and attempts < self._max_retries:
                 wait = _retry_after(resp)
                 log.warning("musicbrainz_throttled", path=path, status=status, retry_after_s=wait)
+                self.throttled += 1
                 self._sleep(wait)
                 attempts += 1
                 continue
