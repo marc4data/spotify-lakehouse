@@ -3,7 +3,12 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from spotify_lakehouse.api import SpotifyApiError, SpotifyClient
+from spotify_lakehouse.api import (
+    MAX_RETRY_AFTER_SECONDS,
+    RetryAfterTooLong,
+    SpotifyApiError,
+    SpotifyClient,
+)
 
 
 def _client(handler, **kwargs) -> tuple[SpotifyClient, list[float], list[str]]:
@@ -28,6 +33,38 @@ def test_honors_retry_after_on_429() -> None:
     client, sleeps, _ = _client(lambda r: next(responses), min_interval=0)
     assert client.get("/me") == {"ok": 1}
     assert 7.0 in sleeps
+
+
+def test_retry_after_above_the_cap_raises_without_sleeping() -> None:
+    """R-041: a twelve-hour Retry-After is recorded and raised, never slept through."""
+    noted: list[tuple] = []
+    client, sleeps, _ = _client(
+        lambda r: httpx.Response(429, headers={"Retry-After": "44356"}),
+        min_interval=0,
+        on_rate_limited=lambda *event: noted.append(event),
+    )
+    with pytest.raises(RetryAfterTooLong) as exc:
+        client.get("/artists/abc")
+    assert exc.value.retry_after_s == 44356.0
+    assert sleeps == []
+    assert client.calls == 1
+    assert noted == [("/artists/abc", "44356", 44356.0, "raised")]
+
+
+def test_retry_after_at_the_cap_is_slept_and_recorded() -> None:
+    responses = iter(
+        [
+            httpx.Response(429, headers={"Retry-After": str(int(MAX_RETRY_AFTER_SECONDS))}),
+            httpx.Response(200, json={"ok": 1}),
+        ]
+    )
+    noted: list[tuple] = []
+    client, sleeps, _ = _client(
+        lambda r: next(responses), min_interval=0, on_rate_limited=lambda *e: noted.append(e)
+    )
+    assert client.get("/me") == {"ok": 1}
+    assert sleeps == [MAX_RETRY_AFTER_SECONDS]
+    assert [event[-1] for event in noted] == ["slept"]
 
 
 def test_gives_up_after_max_retries() -> None:

@@ -279,10 +279,21 @@ never one denominator (R-024).
 `ms_played` → primary artist (weight 1.0) → each of that artist's genres (weight 1/N) → bucket (sum).
 
 **Built through the genre step (R-024).** `int_allocation_reconciliation` reports every step — total →
-music → artist-resolved → genre-allocated — each naming its residual. The genre step follows one
-MusicBrainz vocabulary (`genre` by default); artist-resolved music whose primary artist has no string in it
+music → artist-identified → genre-allocated — each naming its residual. The genre step follows one
+MusicBrainz vocabulary (`genre` by default); artist-identified music whose primary artist has no string in it
 is `unclassified_ms` — the correct, visible answer, not a failure to be papered over. The bucket step waits
 on the mapping (R-015).
+
+**Step 3 is `artist_identified`: the play's primary artist id is known (amended by spot-main-R-041, Cowork's
+decision on R-040 F5).** R-004 defined it as `artist_resolved`, requiring the primary artist's own
+`GET /artists/{id}` response. That made sense while Spotify was to supply genres. It does not: genres come
+from MusicBrainz by ISRC, which reads the artist id off the track and never opens the artist response, so
+the fetch gated the chain on a step the allocation does not pass through. **The change is definitional** —
+the data does not move, the question step 3 asks does — and any before/after comparison must say so.
+
+**The Spotify artist fetch is reported beside the chain, not inside it**, as an enrichment-coverage figure
+(`int_artist_enrichment_coverage`): of the artist-identified plays, how many have a Spotify artist object.
+That object carries the artist's name, which every top-artists view needs; it gates no allocation step.
 
 Consequences Claude Code must handle and the notebook must state:
 - An artist with no genres contributes to **no bucket**, not to `other`. `other` means "mapped to a

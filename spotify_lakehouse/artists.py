@@ -12,6 +12,11 @@ from typing import Any
 
 import psycopg
 
+# Its own lock, not spot_refresh (spot-main-R-041, R-040 F2). This command calls Spotify but it is
+# not the refresh: sharing the poller's lock is what turned R-040's twelve-hour Retry-After into a
+# data-loss risk.
+LOCK_NAME = "spot_artists"
+
 
 def artist_ids_from_track(track: dict[str, Any]) -> set[str]:
     """Every artist id credited on one track object or its album."""

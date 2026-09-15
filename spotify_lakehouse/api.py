@@ -17,6 +17,14 @@ log = structlog.get_logger(__name__)
 
 API_BASE = "https://api.spotify.com/v1"
 DEFAULT_RETRY_AFTER_SECONDS = 5
+# The longest single Retry-After the client will sleep through (spot-main-R-041, R-040 F2).
+# R-040's extract-artists got `Retry-After: 44356` on its first call and went to sleep holding the
+# poller's lock: left alone it would have skipped every poll for twelve hours, and recently-played
+# keeps only 50 items and cannot page backward (R-018), so those plays would have been lost.
+# Every command that calls Spotify is resumable, so a run that stops and loses its place costs
+# nothing; a sleep that holds a lock for hours costs the poller its window. Above the cap the client
+# does not sleep: it raises.
+MAX_RETRY_AFTER_SECONDS = 120.0
 # Cut off for apps registered after 2024-11-27 (CLAUDE.md §4). Refused before any HTTP call.
 DEAD_ENDPOINTS = re.compile(
     r"^/(audio-features|audio-analysis|recommendations|browse/featured-playlists"
@@ -28,6 +36,24 @@ class SpotifyApiError(RuntimeError):
     def __init__(self, status: int, message: str) -> None:
         super().__init__(message)
         self.status = status
+
+
+class RetryAfterTooLong(SpotifyApiError):
+    """A 429 whose Retry-After exceeds the cap: the caller should stop cleanly, not wait."""
+
+    def __init__(self, path: str, retry_after_s: float, cap_s: float) -> None:
+        super().__init__(
+            429,
+            f"GET {path} -> 429 with Retry-After {retry_after_s:.0f} s, above the {cap_s:.0f} s "
+            "cap; not sleeping (R-041)",
+        )
+        self.path = path
+        self.retry_after_s = retry_after_s
+
+
+# (path, raw Retry-After header or None, seconds the client derived from it, action)
+# action: 'slept' (waited and retried), 'raised' (above the cap), 'gave_up' (retries exhausted)
+RateLimitCallback = Callable[[str, str | None, float, str], None]
 
 
 def _error_message(resp: httpx.Response) -> str:
@@ -54,6 +80,8 @@ class SpotifyClient:
         transport: httpx.BaseTransport | None = None,
         min_interval: float = 1.0,
         max_retries: int = 5,
+        max_retry_after: float = MAX_RETRY_AFTER_SECONDS,
+        on_rate_limited: RateLimitCallback | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -63,6 +91,8 @@ class SpotifyClient:
         self._http = httpx.Client(base_url=API_BASE, timeout=30, transport=transport)
         self._min_interval = min_interval
         self._max_retries = max_retries
+        self._max_retry_after = max_retry_after
+        self._on_rate_limited = on_rate_limited
         self._sleep = sleep
         self._clock = clock
         self._last_call: float | None = None
@@ -89,6 +119,10 @@ class SpotifyClient:
             if wait > 0:
                 self._sleep(wait)
 
+    def _note_rate_limit(self, path: str, header: str | None, wait: float, action: str) -> None:
+        if self._on_rate_limited is not None:
+            self._on_rate_limited(path, header, wait, action)
+
     def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if DEAD_ENDPOINTS.match(path):
             raise SpotifyApiError(410, f"{path} is closed to this app (CLAUDE.md §4); not calling.")
@@ -102,12 +136,19 @@ class SpotifyClient:
             self._last_call = self._clock()
             status = resp.status_code
 
-            if status == 429 and attempts < self._max_retries:
+            if status == 429:
                 wait = _retry_after(resp)
+                header = resp.headers.get("Retry-After")
                 log.warning("rate_limited", path=path, retry_after_s=wait, attempt=attempts + 1)
-                self._sleep(wait)
-                attempts += 1
-                continue
+                if wait > self._max_retry_after:
+                    self._note_rate_limit(path, header, wait, "raised")
+                    raise RetryAfterTooLong(path, wait, self._max_retry_after)
+                if attempts < self._max_retries:
+                    self._note_rate_limit(path, header, wait, "slept")
+                    self._sleep(wait)
+                    attempts += 1
+                    continue
+                self._note_rate_limit(path, header, wait, "gave_up")
             if status == 401 and not refreshed:
                 log.info("access_token_rejected", path=path, profile=self.profile)
                 self._on_unauthorized()

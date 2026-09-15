@@ -28,7 +28,7 @@ from typing import Any
 
 import psycopg
 
-from spotify_lakehouse.api import SpotifyApiError, SpotifyClient
+from spotify_lakehouse.api import RetryAfterTooLong, SpotifyApiError, SpotifyClient
 from spotify_lakehouse.raw_store import feed_for_endpoint, insert_response, scrub, write_response
 
 LOCK_NAME = "spot_tracks"
@@ -229,7 +229,8 @@ def resolve(
         try:
             payload = api.get(f"/tracks/{track_id}")
         except SpotifyApiError as exc:
-            if exc.status in (401, 403):
+            # Above the Retry-After cap every further id would 429 too: stop, do not record an error
+            if exc.status in (401, 403) or isinstance(exc, RetryAfterTooLong):
                 raise
             if exc.status in TERMINAL_STATUSES:
                 _record(

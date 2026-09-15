@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: int_artist_enrichment_coverage
+    description: >
+      Per profile: music plays, plays whose primary artist id is known (allocation step 3), and plays whose
+      primary artist also has a Spotify artist object (name). Beside the chain, not a step in it (R-041).
+    columns:
+      - name: profile_slug
+        tests:
+          - unique
+          - not_null

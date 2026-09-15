@@ -17,6 +17,7 @@ import pandas as pd
 import psycopg
 from psycopg import sql
 
+from spotify_lakehouse import rate_limits
 from spotify_lakehouse.api import SpotifyClient
 from spotify_lakehouse.config import (
     ConfigError,
@@ -83,10 +84,16 @@ class NotebookContext:
     @contextmanager
     def api(self) -> Iterator[SpotifyClient]:
         """A paced Spotify client, holding the `spot_refresh` lock so the poller skips meanwhile."""
+        run_id = f"notebook-{self.session}-{self.started_at:%Y%m%dT%H%M%S}"
         with (
             refresh_lock(self.conn),
             SpotifyClient.for_profile(
-                self.profile, self.settings, min_interval=API_MIN_INTERVAL_SECONDS
+                self.profile,
+                self.settings,
+                min_interval=API_MIN_INTERVAL_SECONDS,
+                on_rate_limited=rate_limits.recorder(
+                    self.conn, run_id=run_id, command="notebook", profile=self.profile
+                ),
             ) as client,
         ):
             yield client

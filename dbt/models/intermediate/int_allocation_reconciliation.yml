@@ -3,9 +3,10 @@ version: 2
 models:
   - name: int_allocation_reconciliation
     description: >
-      total listening -> music -> artist-resolved -> genre-allocated, one row per (profile, step), each
-      step naming its residual (data-contracts §4). R-009 prints this. Step 4 follows one MusicBrainz
-      vocabulary, var('allocation_tag_type'), default genre (R-024).
+      total listening -> music -> artist-identified -> genre-allocated, one row per (profile, step), each
+      step naming its residual (data-contracts §4). R-009 prints this. Step 3 is the primary artist id being
+      known; the Spotify artist-object fetch is not a step and is reported in int_artist_enrichment_coverage
+      (R-041). Step 4 follows one MusicBrainz vocabulary, var('allocation_tag_type'), default genre (R-024).
     tests:
       - dbt_utils_free_unique_combination:
           arguments:
@@ -15,4 +16,4 @@ models:
         tests:
           - accepted_values:
               arguments:
-                values: [total_listening, music, artist_resolved, genre_allocated]
+                values: [total_listening, music, artist_identified, genre_allocated]

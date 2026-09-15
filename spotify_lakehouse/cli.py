@@ -14,8 +14,18 @@ from typing import Any
 import httpx
 import structlog
 
-from spotify_lakehouse import auth, export, migrate, musicbrainz, poller, profiles, tracks
-from spotify_lakehouse.api import SpotifyApiError, SpotifyClient
+from spotify_lakehouse import (
+    artists,
+    auth,
+    export,
+    migrate,
+    musicbrainz,
+    poller,
+    profiles,
+    rate_limits,
+    tracks,
+)
+from spotify_lakehouse.api import RetryAfterTooLong, SpotifyApiError, SpotifyClient
 from spotify_lakehouse.artists import artist_ids_to_fetch
 from spotify_lakehouse.config import ConfigError, load_settings, musicbrainz_contact, session
 from spotify_lakehouse.db import connect, refresh_lock, try_advisory_lock, try_refresh_lock
@@ -173,10 +183,18 @@ def cmd_probe(args: argparse.Namespace) -> int:
     settings = load_settings()
     run_id = f"probe-{session()}-{uuid.uuid4().hex[:8]}"
     lines = [f"spot probe  profile={profile}  run_id={run_id}"]
+    # probe stays on spot_refresh: a few calls (at most MAX_FOLLOW_NEXT pages) of the poller's own
+    # endpoint, which must not interleave with a poll. The Retry-After cap bounds how long it waits.
     with (
         connect(settings, autocommit=True) as conn,
         refresh_lock(conn),
-        SpotifyClient.for_profile(profile, settings) as api,
+        SpotifyClient.for_profile(
+            profile,
+            settings,
+            on_rate_limited=rate_limits.recorder(
+                conn, run_id=run_id, command="probe", profile=profile
+            ),
+        ) as api,
     ):
         for endpoint, params in PROBE_ENDPOINTS:
             feed = feed_for_endpoint(endpoint)
@@ -209,38 +227,59 @@ def cmd_extract_artists(args: argparse.Namespace) -> int:
     stored = 0
     not_found = 0
     with_genres_key = 0
+    stopped: RetryAfterTooLong | None = None
     with (
         connect(settings, autocommit=True) as conn,
-        refresh_lock(conn),
-        SpotifyClient.for_profile(profile, settings) as api,
+        try_advisory_lock(conn, artists.LOCK_NAME) as acquired,
     ):
-        artist_ids = artist_ids_to_fetch(conn, refresh=args.refresh)
-        print(
-            f"spot extract-artists  profile={profile}  run_id={run_id}  to fetch: {len(artist_ids)}"
-        )
-        for artist_id in artist_ids:
-            endpoint = f"/artists/{artist_id}"
-            feed = feed_for_endpoint(endpoint)
-            try:
-                payload = api.get(endpoint)
-            except SpotifyApiError as exc:
-                if exc.status not in (400, 404):
-                    raise
-                not_found += 1  # not stored, so it stays in the fetch list and is visible next run
-                print(f"  not found: {artist_id} ({exc.status})", file=sys.stderr)
-                continue
-            clean, _ = scrub(endpoint, payload)
-            source_file = write_response(
-                profile, feed, clean, run_id, datetime.now(UTC), key=artist_id
+        if not acquired:
+            print(
+                f"spot extract-artists: the {artists.LOCK_NAME} lock is held elsewhere",
+                file=sys.stderr,
             )
-            insert_response(conn, clean, source_file, profile, feed)
-            stored += 1
-            with_genres_key += "genres" in clean
-        http_calls = api.calls
+            return 1
+        on_429 = rate_limits.recorder(
+            conn, run_id=run_id, command="extract-artists", profile=profile
+        )
+        with SpotifyClient.for_profile(profile, settings, on_rate_limited=on_429) as api:
+            artist_ids = artist_ids_to_fetch(conn, refresh=args.refresh)
+            print(
+                f"spot extract-artists  profile={profile}  run_id={run_id}  "
+                f"to fetch: {len(artist_ids)}"
+            )
+            try:
+                for artist_id in artist_ids:
+                    endpoint = f"/artists/{artist_id}"
+                    feed = feed_for_endpoint(endpoint)
+                    try:
+                        payload = api.get(endpoint)
+                    except SpotifyApiError as exc:
+                        if exc.status not in (400, 404):
+                            raise
+                        not_found += 1  # not stored, so it stays in the fetch list for next run
+                        print(f"  not found: {artist_id} ({exc.status})", file=sys.stderr)
+                        continue
+                    clean, _ = scrub(endpoint, payload)
+                    source_file = write_response(
+                        profile, feed, clean, run_id, datetime.now(UTC), key=artist_id
+                    )
+                    insert_response(conn, clean, source_file, profile, feed)
+                    stored += 1
+                    with_genres_key += "genres" in clean
+            except RetryAfterTooLong as exc:
+                stopped = exc  # stored responses are kept; a re-run fetches only what is left
+            http_calls = api.calls
     print(
         f"stored {stored} artist response(s) as feed=artist; not found {not_found}; "
         f"with a 'genres' key: {with_genres_key}; HTTP calls sent {http_calls}"
     )
+    if stopped is not None:
+        print(
+            f"spot extract-artists: stopped, {artists.LOCK_NAME} released: {stopped}. "
+            f"Retry-After recorded in spot_meta.rate_limit_event (run_id {run_id}).",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 
@@ -323,8 +362,20 @@ def cmd_resolve_tracks(args: argparse.Namespace) -> int:
                 "(R-037), so every id is one call. Add --run to make them."
             )
             return 0
-        with SpotifyClient.for_profile(profile, settings) as api:
-            summary = tracks.resolve(api, conn, profile, run_id, limit=args.limit)
+        on_429 = rate_limits.recorder(
+            conn, run_id=run_id, command="resolve-tracks", profile=profile
+        )
+        with SpotifyClient.for_profile(profile, settings, on_rate_limited=on_429) as api:
+            try:
+                summary = tracks.resolve(api, conn, profile, run_id, limit=args.limit)
+            except RetryAfterTooLong as exc:
+                print(
+                    f"spot resolve-tracks: stopped after {api.calls} HTTP call(s), "
+                    f"{tracks.LOCK_NAME} released: {exc}. Settled lookups are kept; a re-run "
+                    "resumes.",
+                    file=sys.stderr,
+                )
+                return 2
             http_calls = api.calls
     coverage = 100 * summary.resolved_ms / (summary.unresolved_ms_at_start or 1)
     print(
@@ -461,7 +512,8 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         for slug in to_poll:
             started_at = datetime.now(UTC)
             try:
-                with SpotifyClient.for_profile(slug, settings) as api:
+                on_429 = rate_limits.recorder(conn, run_id=run_id, command="refresh", profile=slug)
+                with SpotifyClient.for_profile(slug, settings, on_rate_limited=on_429) as api:
                     outcome = poller.poll_profile(api, conn, slug, run_id)
             except (SpotifyApiError, auth.AuthError, httpx.HTTPError) as exc:
                 failures += 1
