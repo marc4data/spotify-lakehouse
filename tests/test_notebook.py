@@ -53,3 +53,20 @@ def test_setup_refuses_an_unregistered_profile_and_says_how_to_fix(db) -> None:
 
     with pytest.raises(ConfigError, match="profiles.csv"):
         setup(profile="nobody_registered_this", table_css=False)
+
+
+def test_setup_takes_the_profile_from_spot_profile(db, monkeypatch) -> None:
+    """R-009: `make report-02 PROFILE=<slug>` reaches setup() through the environment."""
+    from spotify_lakehouse.notebook import PROFILE_ENV, main, setup
+
+    monkeypatch.setenv(PROFILE_ENV, "marc")
+    ctx = setup(table_css=False)
+    try:
+        assert ctx.profile == "marc"
+    finally:
+        ctx.close()
+    assert main() == 0
+    monkeypatch.setenv(PROFILE_ENV, "nobody_registered_this")
+    with pytest.raises(ConfigError, match=r"registered: .*marc"):
+        setup(table_css=False)
+    assert main() == 2

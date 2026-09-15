@@ -135,8 +135,11 @@ Section 7 is the map from API surface to warehouse model.
 **Purpose:** the actual analysis. Reads the marts, not the API.
 
 ```
-# Listening Patterns — <profile display name>
-  [intro: coverage window, source mix, the ms_played caveat, stated plainly]
+# Listening Patterns                                   (H1: report title. R-009: not the display name —
+                                                       dim_profile.display_name is Spotify's /me
+                                                       display name, which §0's PII rule redacts;
+                                                       the slug goes in the intro and the filename)
+  [intro: profile slug, coverage window, source mix, the ms_played caveat, stated plainly]
 
 ## 1. Coverage & Caveats
    [Non-negotiable opening section. Export window, API window, % rows with duration,
@@ -182,7 +185,25 @@ Section 7 is the map from API surface to warehouse model.
 ### 6.2 Shuffle vs. deliberate                        [reason_start distribution]
 ### 6.3 Offline listening                             [proxy for travel]
 ### 6.4 Platform mix over time
+### 6.5 Relocation signals — country and hour-of-day phase
+                                                      [added R-009 for R-038: `conn_country` by date
+                                                       range, and each month's circular-mean local
+                                                       hour against a rolling ±6-month baseline, with
+                                                       runs of shifted months as date ranges. Reports
+                                                       the shift and its dates, never a place: the
+                                                       section's own text says why]
 ```
+
+**§4.2–§4.4 wait on R-015.** They render as stated placeholders naming R-015 until the 13-bucket seed
+mapping exists. Raw genre strings are not a substitute for buckets, and the sections are not omitted.
+
+**Choosing the profile (R-009).** The notebook's first cell is `ctx = setup()`, with no literal:
+`setup()` takes its profile from the `SPOT_PROFILE` environment variable (default `marc` when unset).
+`make report-02 PROFILE=<slug>` sets it, checks the slug against `spot_meta.profile_registry` first
+(`python -m spotify_lakehouse.notebook`, which names the registered slugs on failure), and renders
+`reports/02_listening_patterns_<slug>.html`. No papermill and no new dependency. A registered profile
+with no export still renders: §1 says no export is loaded, and each export-only panel says what is
+missing instead of drawing.
 
 **Chart contracts:**
 - **Radar (§4.2, §4.3):** normalize to *share of allocated music time*, never raw milliseconds — raw
@@ -196,7 +217,7 @@ Section 7 is the map from API surface to warehouse model.
 - **Weekly grain, not daily,** for anything spanning more than two years. Daily over a decade is
   4,000 points of noise.
 
-**Multi-profile:** built for one profile via `setup(profile=...)`, parameterized so the same notebook
-runs for `marie`, `brody`, `emma`. A family comparison notebook (`03_family_comparison.ipynb`) is a
+**Multi-profile:** built for one profile at a time via `SPOT_PROFILE` (above), so the same notebook
+runs for `marie`, `brody`, `emma` once each is registered. A family comparison notebook (`03_family_comparison.ipynb`) is a
 later round and is not specified here — it should not be attempted until §1–§6 are real for one
 person.

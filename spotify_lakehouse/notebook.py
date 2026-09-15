@@ -7,6 +7,8 @@ string and no credential: without this package it cannot run at all, which is th
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -33,6 +35,9 @@ from spotify_lakehouse.db import connect, try_advisory_lock
 API_MIN_INTERVAL_SECONDS = 1.5
 # The notebook's own lock, never spot_refresh (R-042): see NotebookContext.api.
 NOTEBOOK_LOCK_NAME = "spot_notebook"
+# Which person a notebook runs for, set by `make report-02 PROFILE=<slug>` (R-009).
+PROFILE_ENV = "SPOT_PROFILE"
+DEFAULT_PROFILE = "marc"
 
 # Marc's standing preference for DataFrame tables in notebooks (light, print-friendly).
 TABLE_CSS = """
@@ -142,24 +147,37 @@ def _configure_libraries(table_css: bool) -> None:
         display(HTML(TABLE_CSS))
 
 
-def setup(profile: str = "marc", *, table_css: bool = True) -> NotebookContext:
-    """Open the notebook context for one profile. Raises ConfigError, with the fix, if it cannot."""
-    session_name = session()
-    settings = load_settings()
-    conn = connect(settings, autocommit=True)
-    registered = [
+def registered_profiles(conn: psycopg.Connection) -> list[str]:
+    return [
         row[0]
         for row in conn.execute(
             "select profile_slug from spot_meta.profile_registry order by profile_slug"
         )
     ]
+
+
+def unregistered_message(profile: str, registered: list[str]) -> str:
+    return (
+        f"Profile {profile!r} is not in spot_meta.profile_registry "
+        f"(registered: {', '.join(registered) or 'none'}). Fix: add a row to "
+        "~/.config/spot/profiles.csv, then run `uv run spot sync-profiles`."
+    )
+
+
+def setup(profile: str | None = None, *, table_css: bool = True) -> NotebookContext:
+    """Open the notebook context for one profile. Raises ConfigError, with the fix, if it cannot.
+
+    The profile defaults from `SPOT_PROFILE` (R-009), so a notebook's own cell names nobody and
+    `make report-02 PROFILE=<slug>` chooses the person; without the variable it is `marc`.
+    """
+    profile = profile or os.environ.get(PROFILE_ENV) or DEFAULT_PROFILE
+    session_name = session()
+    settings = load_settings()
+    conn = connect(settings, autocommit=True)
+    registered = registered_profiles(conn)
     if profile not in registered:
         conn.close()
-        raise ConfigError(
-            f"Profile {profile!r} is not in spot_meta.profile_registry "
-            f"(registered: {', '.join(registered) or 'none'}). Fix: add a row to "
-            "~/.config/spot/profiles.csv, then run `uv run spot sync-profiles`."
-        )
+        raise ConfigError(unregistered_message(profile, registered))
     _configure_libraries(table_css)
     return NotebookContext(
         profile=profile,
@@ -170,3 +188,28 @@ def setup(profile: str = "marc", *, table_css: bool = True) -> NotebookContext:
         conn=conn,
         settings=settings,
     )
+
+
+def main() -> int:
+    """`python -m spotify_lakehouse.notebook`: check that `SPOT_PROFILE` names a registered profile.
+
+    `make report-02` runs this before executing the notebook, so an unknown slug fails in one line
+    naming the registered slugs, not in a traceback from inside a kernel.
+    """
+    profile = os.environ.get(PROFILE_ENV, "")
+    try:
+        with connect(load_settings(require_spotify=False)) as conn:
+            registered = registered_profiles(conn)
+    except (ConfigError, psycopg.OperationalError) as exc:
+        print(f"spot notebook: {exc}", file=sys.stderr)
+        return 2
+    if profile not in registered:
+        message = unregistered_message(profile or "(unset)", registered)
+        print(f"spot notebook: {message}", file=sys.stderr)
+        return 2
+    print(f"spot notebook: profile {profile!r} is registered")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

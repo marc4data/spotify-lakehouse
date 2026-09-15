@@ -3,7 +3,7 @@ CONFIG_DIR ?= $(HOME)/.config/spot
 COMPOSE := docker compose --env-file $(CONFIG_DIR)/.env
 
 .PHONY: help bootstrap db-up db-down migrate dbt-parse dbt-build dbt-test dbt-profile test lint format \
-	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 notebook worktree worktree-remove
+	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 report-02 notebook worktree worktree-remove
 
 help:
 	@echo "bootstrap    one command to make this checkout fully operational (idempotent)"
@@ -17,6 +17,7 @@ help:
 	@echo "resolve-tracks PROFILE=marc  DRY RUN: count export tracks still to look up (add --run via uv run spot)"
 	@echo "notebook     start Jupyter Lab (uv run jupyter lab)"
 	@echo "report-01    execute and render notebooks/01_data_inventory.ipynb to reports/"
+	@echo "report-02 PROFILE=marc  render notebooks/02_listening_patterns.ipynb for one profile"
 	@echo "worktree NAME=wtc          create ../spotify-wtc, bootstrap it, print what it provisioned"
 	@echo "worktree-remove NAME=wtc   remove it, delete its branch if merged, drop its schemas"
 	@echo "test / lint / format"
@@ -74,6 +75,19 @@ report-01:
 		--author "Marc Alexander" --toc-depth 3 -o reports/01_data_inventory.html
 	uv run nbstripout notebooks/01_data_inventory.ipynb
 	@echo "Report: reports/01_data_inventory.html (notebook outputs stripped again)"
+
+# One profile per run (R-009): SPOT_PROFILE reaches setup() inside the kernel, so the notebook names
+# nobody. The slug is checked against spot_meta.profile_registry before anything executes.
+report-02:
+	@test -n "$(PROFILE)" || { echo "usage: make report-02 PROFILE=<slug>" >&2; exit 2; }
+	SPOT_PROFILE="$(PROFILE)" uv run python -m spotify_lakehouse.notebook
+	SPOT_PROFILE="$(PROFILE)" uv run jupyter nbconvert --to notebook --execute --inplace \
+		--ExecutePreprocessor.timeout=900 notebooks/02_listening_patterns.ipynb
+	mkdir -p reports
+	uv run --with-editable $(NB2REPORT) nb2report notebooks/02_listening_patterns.ipynb \
+		--author "Marc Alexander" --toc-depth 3 -o "reports/02_listening_patterns_$(PROFILE).html"
+	uv run nbstripout notebooks/02_listening_patterns.ipynb
+	@echo "Report: reports/02_listening_patterns_$(PROFILE).html (notebook outputs stripped again)"
 
 notebook:
 	uv run jupyter lab
