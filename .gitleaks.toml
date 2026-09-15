@@ -5,6 +5,8 @@
 # 40 random 32-hex values with v8.30.0: `SPOTIFY_CLIENT_ID=<hex>` 0/10 caught, bare `<hex>` 0/10,
 # `SPOTIFY_CLIENT_SECRET=<hex>` 7/10 (misses were entropy < 3.5). A Client ID has no "secret" keyword and
 # hex tops out at 4.0 bits of entropy, so the generic rule cannot be relied on for this shape.
+# Re-measured by spot-main-R-020 (2026-09-15, v8.30.0, two synthetic values in all three shapes): defaults
+# caught 1 of 6 (`generic-api-key` on SPOTIFY_CLIENT_SECRET with the high-entropy value), this file 6 of 6.
 
 title = "spotify-lakehouse"
 
@@ -14,8 +16,11 @@ useDefault = true
 [[rules]]
 id = "spot-hex32"
 description = "Standalone 32-hex string: the shape of a Spotify Client ID or Client Secret (CLAUDE.md §5)"
-# RE2 has no lookarounds; bound the match with non-hex characters or line edges instead.
-regex = '''(?:^|[^0-9A-Fa-f])([0-9A-Fa-f]{32})(?:[^0-9A-Fa-f]|$)'''
+# RE2 has no lookarounds; bound the match with non-hex characters or line edges instead. (?m) makes ^ and $
+# line edges, and $ is tried before a consumed character, so a match never swallows the newline the next
+# line's match needs. Without that, a value on the line after another match was never matched, and on the
+# line after an allowlisted fixture the whole scan came back green (measured, spot-main-R-020 F1).
+regex = '''(?m)(?:^|[^0-9A-Fa-f])([0-9A-Fa-f]{32})(?:$|[^0-9A-Fa-f])'''
 secretGroup = 1
 keywords = []
 
