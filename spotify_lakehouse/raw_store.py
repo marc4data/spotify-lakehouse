@@ -83,6 +83,52 @@ def write_response(
     return relative.as_posix()
 
 
+EXTERNAL_SOURCES = frozenset({"musicbrainz"})
+EXTERNAL_FILE_KEY = re.compile(r"[A-Za-z0-9-]+")  # ISRCs and MBIDs (UUIDs carry hyphens)
+
+
+def write_external_response(
+    source: str,
+    feed: str,
+    payload: dict[str, Any],
+    run_id: str,
+    fetched_at: datetime,
+    key: str,
+) -> str:
+    """Write one non-Spotify response under data/raw/external/<source>/<feed>/ (spot-main-R-024)."""
+    if source not in EXTERNAL_SOURCES:
+        raise ValueError(f"Unknown external source {source!r}")
+    if not FEED_NAME.fullmatch(feed):
+        raise ValueError(f"Invalid feed name {feed!r}")
+    if not EXTERNAL_FILE_KEY.fullmatch(key):
+        raise ValueError(f"Invalid file key {key!r}: letters, digits and hyphens only")
+    relative = Path("external") / source / feed / f"{fetched_at:%Y%m%dT%H%M%SZ}_{run_id}_{key}.json"
+    target = raw_dir() / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("x") as fh:  # "x": never overwrite an existing raw file
+        json.dump(payload, fh, indent=2, sort_keys=True)
+    target.chmod(0o600)
+    return relative.as_posix()
+
+
+def insert_external_response(
+    conn: psycopg.Connection,
+    *,
+    source: str,
+    feed: str,
+    request_key: str,
+    payload: dict[str, Any],
+    source_file: str,
+) -> int:
+    row = conn.execute(
+        "insert into raw.external_response (source, feed, request_key, payload, source_file) "
+        "values (%s, %s, %s, %s, %s) returning id",
+        (source, feed, request_key, Jsonb(payload), source_file),
+    ).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
 def insert_response(
     conn: psycopg.Connection,
     payload: dict[str, Any],

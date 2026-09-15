@@ -1,0 +1,9 @@
+version: 2
+
+models:
+  - name: int_artist_genres__current
+    description: Current MusicBrainz genre and tag strings per Spotify artist (R-024).
+    tests:
+      - dbt_utils_free_unique_combination:
+          arguments:
+            columns: [artist_id, tag_type, tag_name]

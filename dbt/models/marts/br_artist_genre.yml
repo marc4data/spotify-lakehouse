@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: br_artist_genre
+    description: >
+      One row per (artist_key, genre_key); weight_factor = 1/N within the artist's tag_type (R-024).
+      Two parallel allocations (genre, tag): always filter on tag_type before summing weights.
+    tests:
+      - dbt_utils_free_unique_combination:
+          arguments:
+            columns: [artist_key, genre_key]
+    columns:
+      - name: artist_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_artist')
+                field: artist_key
+      - name: genre_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_genre')
+                field: genre_key
+      - name: tag_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: [genre, tag]

@@ -18,6 +18,25 @@ sources:
                     values: [me, recently_played, artist]
           - name: profile_slug
             tests: [not_null]
+      - name: external_response
+        description: >
+          One row per response from a non-Spotify source (R-024), keyed by the id requested. No
+          profile_slug: an artist's genres are the same whoever played them.
+        columns:
+          - name: id
+            tests: [unique, not_null]
+          - name: source
+            tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [musicbrainz]
+          - name: feed
+            tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [isrc_lookup, artist]
 
   - name: spot_meta
     schema: spot_meta

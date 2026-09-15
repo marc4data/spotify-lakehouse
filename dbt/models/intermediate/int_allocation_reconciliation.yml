@@ -4,7 +4,8 @@ models:
   - name: int_allocation_reconciliation
     description: >
       total listening -> music -> artist-resolved -> genre-allocated, one row per (profile, step), each
-      step naming its residual (data-contracts §4). R-009 prints this. Ends at artist-resolved until R-024.
+      step naming its residual (data-contracts §4). R-009 prints this. Step 4 follows one MusicBrainz
+      vocabulary, var('allocation_tag_type'), default genre (R-024).
     tests:
       - dbt_utils_free_unique_combination:
           arguments:

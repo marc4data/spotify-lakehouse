@@ -106,6 +106,67 @@ def test_raw_api_response_feed_format_is_checked(db) -> None:
     _in_rolled_back_transaction(db, work)
 
 
+def test_raw_external_response_is_append_only_and_has_no_profile(db) -> None:
+    import psycopg
+
+    marker = f"pytest-{uuid.uuid4().hex[:8]}"
+    columns = {
+        name
+        for (name,) in db.execute(
+            "select column_name from information_schema.columns "
+            "where table_schema = 'raw' and table_name = 'external_response'"
+        )
+    }
+    assert "profile_slug" not in columns
+    assert {"source", "feed", "request_key", "payload", "source_file", "ingested_at"} <= columns
+
+    def work() -> None:
+        row = db.execute(
+            "insert into raw.external_response (source, feed, request_key, payload, source_file) "
+            "values ('musicbrainz', 'artist', 'k', '{}'::jsonb, %s) returning id",
+            (marker,),
+        ).fetchone()
+        with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
+            db.execute("update raw.external_response set request_key = 'x' where id = %s", row)
+
+    _in_rolled_back_transaction(db, work)
+
+    def delete_work() -> None:
+        row = db.execute(
+            "insert into raw.external_response (source, feed, request_key, payload, source_file) "
+            "values ('musicbrainz', 'artist', 'k', '{}'::jsonb, %s) returning id",
+            (marker,),
+        ).fetchone()
+        with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
+            db.execute("delete from raw.external_response where id = %s", row)
+
+    _in_rolled_back_transaction(db, delete_work)
+
+
+@pytest.mark.parametrize(
+    ("source", "feed", "constraint"),
+    [
+        ("lastfm", "artist", "external_response_source_allowed"),
+        ("musicbrainz", "Isrc-Lookup", "external_response_feed_format"),
+    ],
+)
+def test_raw_external_response_checks_source_and_feed(
+    db, source: str, feed: str, constraint: str
+) -> None:
+    import psycopg
+
+    def work() -> None:
+        with pytest.raises(psycopg.errors.CheckViolation, match=constraint):
+            db.execute(
+                "insert into raw.external_response "
+                "(source, feed, request_key, payload, source_file) "
+                "values (%s, %s, 'k', '{}'::jsonb, 'pytest')",
+                (source, feed),
+            )
+
+    _in_rolled_back_transaction(db, work)
+
+
 def test_profile_registry_rejects_unknown_role(db) -> None:
     import psycopg
 

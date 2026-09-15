@@ -2,9 +2,20 @@ version: 2
 
 models:
   - name: dim_artist
-    description: One row per artist, plus the -1 unknown member. SCD Type 1 until R-024.
+    description: >
+      One row per artist version, plus the -1 unknown member. SCD Type 2 on MusicBrainz genres and
+      genre_source (R-024); exactly one is_current row per artist_id.
+    tests:
+      - dbt_utils_free_unique_combination:
+          arguments:
+            columns: [artist_id, valid_from]
     columns:
       - name: artist_key
         tests: [unique, not_null]
       - name: artist_id
-        tests: [unique, not_null]
+        tests: [not_null]
+      - name: genre_source
+        tests:
+          - accepted_values:
+              arguments:
+                values: [musicbrainz]

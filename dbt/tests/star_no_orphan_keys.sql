@@ -41,6 +41,18 @@ orphans as (
     where d.artist_key is null
 
     union all
+    select 'br_artist_genre.artist_key', br.artist_key
+    from {{ ref('br_artist_genre') }} as br
+    left join {{ ref('dim_artist') }} as d on d.artist_key = br.artist_key
+    where d.artist_key is null
+
+    union all
+    select 'br_artist_genre.genre_key', br.genre_key
+    from {{ ref('br_artist_genre') }} as br
+    left join {{ ref('dim_genre') }} as d on d.genre_key = br.genre_key
+    where d.genre_key is null
+
+    union all
     select 'dim_track_detail.content_key', t.content_key
     from {{ ref('dim_track_detail') }} as t
     left join {{ ref('dim_content') }} as d on d.content_key = t.content_key

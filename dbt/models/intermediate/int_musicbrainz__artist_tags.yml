@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: int_musicbrainz__artist_tags
+    description: Genre and tag strings per MusicBrainz artist observation, positive votes only (R-024).
+    tests:
+      - dbt_utils_free_unique_combination:
+          arguments:
+            columns: [raw_response_id, tag_type, tag_name]
+    columns:
+      - name: tag_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: [genre, tag]

@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: stg_musicbrainz__isrc_lookup
+    description: One row per MusicBrainz `GET /isrc/{isrc}` response, 404s included (R-024).
+    columns:
+      - name: raw_response_id
+        tests: [unique, not_null]
+      - name: isrc
+        tests: [not_null]

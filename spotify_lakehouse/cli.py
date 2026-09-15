@@ -14,11 +14,11 @@ from typing import Any
 import httpx
 import structlog
 
-from spotify_lakehouse import auth, migrate, poller, profiles
+from spotify_lakehouse import auth, migrate, musicbrainz, poller, profiles
 from spotify_lakehouse.api import SpotifyApiError, SpotifyClient
 from spotify_lakehouse.artists import artist_ids_to_fetch
-from spotify_lakehouse.config import ConfigError, load_settings, session
-from spotify_lakehouse.db import connect, refresh_lock, try_refresh_lock
+from spotify_lakehouse.config import ConfigError, load_settings, musicbrainz_contact, session
+from spotify_lakehouse.db import connect, refresh_lock, try_advisory_lock, try_refresh_lock
 from spotify_lakehouse.paging import (
     MAX_FOLLOW_NEXT,
     RECENTLY_PLAYED_PATH,
@@ -234,6 +234,36 @@ def cmd_extract_artists(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resolve_musicbrainz(args: argparse.Namespace) -> int:
+    settings = load_settings(require_spotify=False)
+    contact = musicbrainz_contact(settings)
+    run_id = f"musicbrainz-{session()}-{uuid.uuid4().hex[:8]}"
+    with (
+        connect(settings, autocommit=True) as conn,
+        try_advisory_lock(conn, musicbrainz.LOCK_NAME) as acquired,
+    ):
+        if not acquired:
+            print(
+                f"spot resolve-musicbrainz: the {musicbrainz.LOCK_NAME} lock is held by another "
+                "session; nothing fetched",
+                file=sys.stderr,
+            )
+            return 1
+        isrcs = len(musicbrainz.isrcs_to_fetch(conn))
+        print(
+            f"spot resolve-musicbrainz  run_id={run_id}  ISRCs to fetch: {isrcs} "
+            f"(~{isrcs * musicbrainz.MIN_INTERVAL_SECONDS:.0f} s, then one call per new artist)"
+        )
+        with musicbrainz.MusicBrainzClient(contact) as client:
+            summary = musicbrainz.resolve(client, conn, run_id)
+    for name, feed in (("isrc_lookup", summary.isrc), ("artist", summary.artist)):
+        print(
+            f"  {name}: to fetch {feed.to_fetch}, stored {feed.found + feed.not_found} "
+            f"(found {feed.found}, unknown to MusicBrainz {feed.not_found})"
+        )
+    return 0
+
+
 def _iso(value: datetime | None) -> str:
     if value is None:
         return "none"
@@ -380,6 +410,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_artists.set_defaults(func=cmd_extract_artists)
 
+    p_mb = sub.add_parser(
+        "resolve-musicbrainz",
+        help="ISRC -> MusicBrainz recording -> artist genres and tags; resumable, skips stored ids",
+    )
+    p_mb.set_defaults(func=cmd_resolve_musicbrainz)
+
     p_profiles = sub.add_parser(
         "sync-profiles", help="load ~/.config/spot/profiles.csv into spot_meta.profile_registry"
     )
@@ -407,6 +443,7 @@ def main(argv: list[str] | None = None) -> int:
         SpotifyApiError,
         migrate.MigrationError,
         UnsafeNextLink,
+        musicbrainz.MusicBrainzError,
     ) as exc:
         print(f"spot {args.command}: {exc}", file=sys.stderr)
         return 2

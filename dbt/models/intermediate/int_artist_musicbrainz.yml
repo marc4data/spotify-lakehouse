@@ -1,0 +1,8 @@
+version: 2
+
+models:
+  - name: int_artist_musicbrainz
+    description: One row per Spotify primary artist with an ISRC-bearing track; its MBID when unambiguous (R-024).
+    columns:
+      - name: artist_id
+        tests: [unique, not_null]

@@ -8,6 +8,10 @@ test-paths: ["tests"]
 seed-paths: ["../seeds"]
 clean-targets: ["target", "dbt_packages"]
 
+vars:
+  # Which MusicBrainz vocabulary int_allocation_reconciliation step 4 follows: genre (curated) or tag (R-024).
+  allocation_tag_type: genre
+
 # Schemas are session-scoped; see macros/generate_schema_name.sql.
 # Convention: one .yml per model file (models/marts/fct_play_event.yml beside fct_play_event.sql).
 models:

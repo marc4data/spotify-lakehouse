@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: stg_musicbrainz__artist
+    description: One row per MusicBrainz artist lookup response (R-024).
+    columns:
+      - name: raw_response_id
+        tests: [unique, not_null]
+      - name: artist_mbid
+        tests: [not_null]

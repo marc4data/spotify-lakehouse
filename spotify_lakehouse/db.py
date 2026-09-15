@@ -50,16 +50,26 @@ def refresh_lock(conn: psycopg.Connection) -> Iterator[None]:
 
 
 @contextmanager
+def try_advisory_lock(conn: psycopg.Connection, name: str) -> Iterator[bool]:
+    """Take a session-level advisory lock without waiting; yields whether it was taken.
+
+    `conn` must be in autocommit mode (session-level lock).
+    """
+    row = conn.execute("select pg_try_advisory_lock(hashtext(%s))", (name,)).fetchone()
+    acquired = bool(row and row[0])
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            conn.execute("select pg_advisory_unlock(hashtext(%s))", (name,))
+
+
+@contextmanager
 def try_refresh_lock(conn: psycopg.Connection) -> Iterator[bool]:
     """Non-blocking variant for the scheduled poller: yields whether the lock was taken.
 
     A poll that finds the lock held must exit quietly: a probe or another poll is already talking
     to Spotify (spot-main-R-017). `conn` must be in autocommit mode (session-level lock).
     """
-    row = conn.execute("select pg_try_advisory_lock(hashtext(%s))", (REFRESH_LOCK_NAME,)).fetchone()
-    acquired = bool(row and row[0])
-    try:
+    with try_advisory_lock(conn, REFRESH_LOCK_NAME) as acquired:
         yield acquired
-    finally:
-        if acquired:
-            conn.execute("select pg_advisory_unlock(hashtext(%s))", (REFRESH_LOCK_NAME,))

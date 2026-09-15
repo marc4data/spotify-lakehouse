@@ -1,0 +1,8 @@
+version: 2
+
+models:
+  - name: int_musicbrainz__isrc_artist
+    description: One row per looked-up ISRC; primary_artist_mbid only when all its recordings agree (R-024).
+    columns:
+      - name: isrc
+        tests: [unique, not_null]

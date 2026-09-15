@@ -11,3 +11,4 @@ inner join {{ ref('dim_content') }} as content
     on content.content_uri = credits.content_uri
 inner join {{ ref('dim_artist') }} as artist
     on artist.artist_id = credits.artist_id
+    and artist.is_current  -- dim_artist is SCD Type 2 since R-024

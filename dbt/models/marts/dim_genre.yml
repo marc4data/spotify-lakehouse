@@ -1,0 +1,20 @@
+version: 2
+
+models:
+  - name: dim_genre
+    description: One row per distinct MusicBrainz genre or tag string, per tag_type, plus -1 (R-024).
+    tests:
+      - dbt_utils_free_unique_combination:
+          arguments:
+            columns: [genre_name, tag_type]
+    columns:
+      - name: genre_key
+        tests: [unique, not_null]
+      - name: genre_name
+        tests: [not_null]
+      - name: tag_type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [genre, tag, unknown]

@@ -1,11 +1,11 @@
 {{ config(enabled=false) }}
--- ⏸️ DISABLED until spot-main-R-024 (genre source).
+-- ⏸️ DISABLED until spot-main-R-015 (the bucket taxonomy).
 --
 -- data-contracts §3: "a dbt test fails the build when `other` exceeds 15% of allocated listening time."
--- It is moot while no genre source exists — nothing is allocated, so there is no `other` to measure —
--- and the models it needs (genre allocation by bucket) are deferred with dim_genre and br_artist_genre.
+-- R-024 built the genre source (dim_genre, br_artist_genre) but deliberately no buckets, so there is still
+-- no `other` to measure.
 --
--- When R-024 lands, enable this and replace the placeholder below with, in outline:
+-- When R-015 lands the bucket map, enable this and replace the placeholder below with, in outline:
 --   select 1
 --   from <bucket allocation model>
 --   having sum(case when bucket_name = 'other' then allocated_ms end)

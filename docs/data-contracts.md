@@ -15,7 +15,7 @@ inside a model, materialization strategy, indexes, test implementation, retry lo
 
 | Schema | Owner | Contents |
 |---|---|---|
-| `raw` | extractor (Python) | **One table, `raw.api_response`, carrying a `feed` column** — not one table per endpoint (F2: a table per endpoint means a migration per new endpoint and an N-way union in staging). Untyped: `id bigserial`, `feed text not null`, `payload jsonb`, `source_file text`, `profile_slug text`, `ingested_at timestamptz`. **Never modified after insert**, enforced by triggers — with exactly one exception: a **schema
+| `raw` | extractor (Python) | **Two tables, distinguished by where the response came from (R-024).** **`raw.external_response`** holds one row per response from a **non-Spotify** source (MusicBrainz, R-024): `id bigserial`, `source text` (checked against an allowlist, `musicbrainz` for now), `feed text` (`isrc_lookup`, `artist`; same format check), `request_key text` (the ISRC or MBID requested, so a 404 is tied to the id it answers and is never re-fetched), `payload jsonb`, `source_file text` (under `data/raw/external/<source>/<feed>/`), `ingested_at timestamptz`. **It has no `profile_slug`, deliberately:** an external source's answer about an artist is the same whoever played it, and a fake value in a not-null column is how a dimension starts lying. Same append-only triggers as below. **`raw.api_response`** holds one row per **Spotify Web API** response, **carrying a `feed` column** — not one table per endpoint (F2: a table per endpoint means a migration per new endpoint and an N-way union in staging). Untyped: `id bigserial`, `feed text not null`, `payload jsonb`, `source_file text`, `profile_slug text`, `ingested_at timestamptz`. **Never modified after insert**, enforced by triggers — with exactly one exception: a **schema
 migration that adds a column which did not exist at insert time** may backfill that column, inside the
 migration's own transaction, with the update trigger disabled for its duration, and must checksum every
 pre-existing column before and after to prove nothing else was written. Adding `feed` to rows written
@@ -208,7 +208,7 @@ calendar attributes plus `is_weekend`, `day_of_week_name`, `iso_week`, `month_st
 (`overnight` 00–05, `morning` 05–09, `midday` 09–12, `afternoon` 12–17, `evening` 17–22,
 `night` 22–24).
 
-### `dim_genre` and `dim_genre_bucket` — ⏸️ DEFERRED to `spot-main-R-024`
+### `dim_genre` and `dim_genre_bucket`
 
 > [!CAUTION]
 > **Everything in this subsection presumes Spotify's genre vocabulary, which this app no longer
@@ -259,7 +259,7 @@ phase-2 change to a weight, not to a model.
 credited artist** (2 artists ×10, 3 ×1, 4 ×2). Any "top artists" figure in phase 1 under-counts featured
 artists by roughly that much, and the notebook says so where the number is shown.
 
-### `br_artist_genre` — ⏸️ DEFERRED to `spot-main-R-024`
+### `br_artist_genre`
 Grain: one row per `(artist_key, genre_key)` with `weight_factor = 1 / count(genres for that artist)`.
 
 **Allocation chain for the radar chart** — the full chain, once a genre source exists:

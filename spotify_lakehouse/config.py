@@ -75,6 +75,21 @@ class Settings:
     pg_host: str = "127.0.0.1"
     pg_port: int = 5433
     pg_database: str = "spot"
+    # Contact for the MusicBrainz User-Agent (R-024). Configuration, never source: a real address in
+    # a tracked file of a public repo is a §5 failure even though it is not a credential.
+    musicbrainz_contact: str = field(default="", repr=False)
+
+
+def musicbrainz_contact(settings: Settings) -> str:
+    """The configured MusicBrainz contact, or a ConfigError saying how to set it."""
+    value = settings.musicbrainz_contact.strip()
+    if not value or PLACEHOLDER_MARKER in value:
+        raise ConfigError(
+            f"{config_dir() / '.env'} has no MUSICBRAINZ_CONTACT. MusicBrainz blocks anonymous "
+            "clients. Fix: add `MUSICBRAINZ_CONTACT=<an email address or URL where you can be "
+            "reached>` to that file. It stays outside the repo."
+        )
+    return value
 
 
 def missing_env_keys(
@@ -113,4 +128,5 @@ def load_settings(*, require_spotify: bool = True) -> Settings:
         pg_password=values["SPOT_PG_PASSWORD"] or "",
         pg_host=values.get("SPOT_PG_HOST") or "127.0.0.1",
         pg_port=int(values.get("SPOT_PG_PORT") or 5433),
+        musicbrainz_contact=values.get("MUSICBRAINZ_CONTACT") or "",
     )

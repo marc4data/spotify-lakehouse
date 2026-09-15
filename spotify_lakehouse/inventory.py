@@ -1017,8 +1017,8 @@ def collect(ctx: Any) -> dict[str, Capture]:
     captures["5.1"].notes.append(
         f"The heading says *deprecated* `genres`; measured, it is **absent**: {with_genres} of "
         f"{len(artist_records)} stored artist responses carry a `genres` key (R-004 found 0 of "
-        "55 across three endpoints). `dim_artist.genre_source` stays NULL until a genre source "
-        "exists (R-024)."
+        "55 across three endpoints). Genres now come from MusicBrainz by ISRC instead "
+        "(`dim_artist.genre_source`, `dim_genre`, `br_artist_genre`; R-024)."
     )
 
     album_id = ctx.scalar(
@@ -1037,7 +1037,7 @@ def emit_intro(ctx: Any, captures: dict[str, Capture]) -> None:
     plays, tracks, artists, albums = ctx.rows(
         "select (select count(*) from {mart}.fct_play_event), "
         "(select count(*) from {mart}.dim_content where content_key > 0), "
-        "(select count(*) from {mart}.dim_artist where artist_key > 0), "
+        "(select count(*) from {mart}.dim_artist where artist_key > 0 and is_current), "
         "(select count(*) from {mart}.dim_album where album_key > 0)"
     )[0]
     _md(

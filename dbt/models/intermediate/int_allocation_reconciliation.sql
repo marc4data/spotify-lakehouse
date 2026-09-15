@@ -1,17 +1,24 @@
 -- Allocation reconciliation, data-contracts §4. One row per (profile, step).
 -- Each step names the residual it lost from the step before, so for every step n > 1:
 --   step[n-1].play_count = step[n].play_count + step[n].residual_play_count   (and the same for ms)
--- This round the chain ends at the artist: no genre source exists until spot-main-R-024, so the
--- genre step is reported as zero and all artist-resolved music is named `unclassified`. That is the
--- correct, visible answer. ms_played is NULL for every API row; play counts carry the chain meanwhile,
--- and pct_rows_with_duration shows the coverage (§2).
-with plays as (
+-- Step 4 counts a play as genre-allocated when its primary artist currently has at least one MusicBrainz
+-- string of the tag_type in var('allocation_tag_type') (default `genre`, the curated list; `tag` is the
+-- folksonomy). The two vocabularies are parallel allocations (br_artist_genre), so the chain follows one.
+-- ms_played is NULL for every API row; play counts carry the chain meanwhile, and pct_rows_with_duration
+-- shows the coverage (§2).
+with artists_with_genre as (
+    select distinct artist_id
+    from {{ ref('int_artist_genres__current') }}
+    where tag_type = '{{ var("allocation_tag_type") }}'
+),
+
+plays as (
     select
         plays.profile_slug,
         plays.ms_played,
         coalesce(tracks.content_type, 'unknown') as content_type,
         coalesce(artists.is_fetched, false) as is_primary_artist_resolved,
-        false as has_genre  -- R-024
+        artists_with_genre.artist_id is not null as has_genre
     from {{ ref('int_play_events__deduped') }} as plays
     left join {{ ref('int_tracks__latest') }} as tracks
         on tracks.content_uri = plays.content_uri
@@ -20,6 +27,8 @@ with plays as (
         and primary_artist.is_primary
     left join {{ ref('int_artists__latest') }} as artists
         on artists.artist_id = primary_artist.artist_id
+    left join artists_with_genre
+        on artists_with_genre.artist_id = primary_artist.artist_id
 ),
 
 flagged as (
@@ -48,7 +57,7 @@ steps as (
     union all
     select profile_slug, 4, 'genre_allocated',
         in_genre_allocated, in_artist_resolved and not in_genre_allocated,
-        'unclassified (no genre source until spot-main-R-024)', ms_played
+        'unclassified (primary artist has no MusicBrainz {{ var("allocation_tag_type") }})', ms_played
     from flagged
 )
 
