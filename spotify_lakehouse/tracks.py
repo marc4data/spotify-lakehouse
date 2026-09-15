@@ -1,10 +1,16 @@
-"""Resolve export track URIs with GET /tracks/{id} (spot-main-R-037).
+"""Resolve export track URIs with GET /tracks/{id} (spot-main-R-037), most-listened first (R-039).
 
 The Extended export names an artist but carries no artist id, so its plays reach no primary artist
 until each track is looked up. Batch `GET /tracks?ids=` returns 403 to this development-mode app
 (measured 2026-09-14 with httpx and curl: 5 ids, 1 id, and with market=from_token), so this is one
 call per track, paced by the client. At ~47,000 ids that is ~13 hours: `spot resolve-tracks` is a
 dry run unless given --run, because that spend is Marc's to authorise.
+
+Order: every figure this feeds is weighted by ms_played, so ids are looked up in descending order
+of total ms_played (then plays, then id, so a resumed run continues rather than reshuffles). There
+is no option to turn that off: nothing is gained by resolving the long tail first. Totals are read
+from raw.export_record, never from a dbt mart; they are not deduplicated, which changes no ordering
+that matters (R-037: 1,217 exact-duplicate rows in 177,747).
 
 Resumable: ids already in raw.api_response (a recently-played item or a stored `track` response)
 and ids recorded as not found in spot_meta.track_lookup are subtracted, so an interrupted run costs
@@ -15,7 +21,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -30,6 +36,7 @@ TRACK_URI = re.compile(r"spotify:track:([A-Za-z0-9]{22})")
 SECONDS_PER_CALL_ESTIMATE = 1.0  # the client's pacing; network time comes on top
 TERMINAL_STATUSES = frozenset({400, 404})
 MAX_CONSECUTIVE_FAILURES = 10
+COVERAGE_CHECKPOINTS = (100, 500, 1_000, 2_500, 5_000, 10_000, 20_000)
 
 
 def track_id_from_uri(uri: object) -> str | None:
@@ -39,16 +46,40 @@ def track_id_from_uri(uri: object) -> str | None:
     return match.group(1) if match else None
 
 
-def export_track_ids(conn: psycopg.Connection) -> set[str]:
-    ids: set[str] = set()
-    for (uri,) in conn.execute(
-        "select distinct payload ->> 'spotify_track_uri' from raw.export_record "
-        "where payload ->> 'spotify_track_uri' is not null"
+@dataclass(frozen=True)
+class RankedTrack:
+    track_id: str
+    ms_played: int
+    plays: int
+
+
+def order_for_resolution(candidates: Iterable[RankedTrack]) -> list[RankedTrack]:
+    """Most-listened first: total ms_played desc, then plays desc, then track id (deterministic)."""
+    return sorted(candidates, key=lambda t: (-t.ms_played, -t.plays, t.track_id))
+
+
+def export_track_totals(conn: psycopg.Connection) -> dict[str, RankedTrack]:
+    """Total ms_played and play count per export track id, straight from raw.export_record."""
+    totals: dict[str, RankedTrack] = {}
+    for uri, ms_played, plays in conn.execute(
+        "select payload ->> 'spotify_track_uri', "
+        "coalesce(sum((payload ->> 'ms_played')::bigint), 0), count(*) "
+        "from raw.export_record where payload ->> 'spotify_track_uri' is not null group by 1"
     ):
         track_id = track_id_from_uri(uri)
-        if track_id:
-            ids.add(track_id)
-    return ids
+        if not track_id:
+            continue
+        seen = totals.get(track_id)
+        totals[track_id] = RankedTrack(
+            track_id,
+            int(ms_played) + (seen.ms_played if seen else 0),
+            int(plays) + (seen.plays if seen else 0),
+        )
+    return totals
+
+
+def export_track_ids(conn: psycopg.Connection) -> set[str]:
+    return set(export_track_totals(conn))
 
 
 def settled_track_ids(conn: psycopg.Connection) -> set[str]:
@@ -73,8 +104,54 @@ def settled_track_ids(conn: psycopg.Connection) -> set[str]:
     return settled
 
 
+def tracks_to_fetch(conn: psycopg.Connection) -> list[RankedTrack]:
+    """Unsettled export tracks, most-listened first."""
+    settled = settled_track_ids(conn)
+    return order_for_resolution(
+        t for track_id, t in export_track_totals(conn).items() if track_id not in settled
+    )
+
+
 def track_ids_to_fetch(conn: psycopg.Connection) -> list[str]:
-    return sorted(export_track_ids(conn) - settled_track_ids(conn))
+    return [t.track_id for t in tracks_to_fetch(conn)]
+
+
+@dataclass(frozen=True)
+class CoverageRow:
+    calls: int
+    pct_unresolved_ms: float
+    pct_unresolved_plays: float
+    pct_all_track_ms: float
+    hours: float
+
+
+def coverage_table(
+    pending: Sequence[RankedTrack],
+    all_track_ms: int,
+    checkpoints: Iterable[int] = COVERAGE_CHECKPOINTS,
+) -> list[CoverageRow]:
+    """What the first N calls buy, at each checkpoint below len(pending) and at len(pending)."""
+    if not pending:
+        return []
+    points = {c for c in checkpoints if 0 < c < len(pending)} | {len(pending)}
+    unresolved_ms = sum(t.ms_played for t in pending) or 1
+    unresolved_plays = sum(t.plays for t in pending) or 1
+    rows: list[CoverageRow] = []
+    cumulative_ms = cumulative_plays = 0
+    for calls, track in enumerate(pending, start=1):
+        cumulative_ms += track.ms_played
+        cumulative_plays += track.plays
+        if calls in points:
+            rows.append(
+                CoverageRow(
+                    calls,
+                    100 * cumulative_ms / unresolved_ms,
+                    100 * cumulative_plays / unresolved_plays,
+                    100 * cumulative_ms / (all_track_ms or 1),
+                    calls * SECONDS_PER_CALL_ESTIMATE / 3600,
+                )
+            )
+    return rows
 
 
 @dataclass
@@ -84,6 +161,8 @@ class TrackSummary:
     not_found: int = 0
     failed: int = 0
     relinked: int = 0
+    resolved_ms: int = 0
+    unresolved_ms_at_start: int = 0
 
 
 def _record(
@@ -135,14 +214,16 @@ def resolve(
     progress_every: int = 50,
     out: Callable[[str], None] = print,
 ) -> TrackSummary:
-    """Look up every unsettled export track id (at most `limit`). Safe to interrupt and re-run."""
-    pending = track_ids_to_fetch(conn)
-    if limit is not None:
-        pending = pending[:limit]
-    summary = TrackSummary(to_fetch=len(pending))
+    """Look up the most-listened unsettled export tracks (at most `limit`). Safe to re-run."""
+    all_pending = tracks_to_fetch(conn)
+    pending = all_pending if limit is None else all_pending[:limit]
+    summary = TrackSummary(
+        to_fetch=len(pending), unresolved_ms_at_start=sum(t.ms_played for t in all_pending)
+    )
     consecutive_failures = 0
     started = time.monotonic()
-    for done, track_id in enumerate(pending, start=1):
+    for done, track in enumerate(pending, start=1):
+        track_id = track.track_id
         try:
             payload = api.get(f"/tracks/{track_id}")
         except SpotifyApiError as exc:
@@ -167,14 +248,17 @@ def resolve(
         else:
             returned = _store(conn, profile, run_id, track_id, payload)
             summary.resolved += 1
+            summary.resolved_ms += track.ms_played
             summary.relinked += returned != track_id
             consecutive_failures = 0
         if done % progress_every == 0 or done == len(pending):
             elapsed = time.monotonic() - started
             remaining = (len(pending) - done) * elapsed / done
+            coverage = 100 * summary.resolved_ms / (summary.unresolved_ms_at_start or 1)
             out(
                 f"  {done}/{len(pending)}  resolved {summary.resolved}  not found "
-                f"{summary.not_found}  failed {summary.failed}  elapsed {elapsed / 60:.1f} min  "
+                f"{summary.not_found}  failed {summary.failed}  coverage {coverage:.1f}% of "
+                f"unresolved ms_played  elapsed {elapsed / 60:.1f} min  "
                 f"remaining ~{remaining / 3600:.1f} h"
             )
     return summary

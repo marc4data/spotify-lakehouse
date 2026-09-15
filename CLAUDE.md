@@ -267,6 +267,17 @@ Cut off for apps registered after 2024-11-27, which includes this one:
 `/audio-features`, `/audio-analysis`, `/recommendations`, `/artists/{id}/related-artists`,
 `/browse/featured-playlists`, `/browse/categories/{id}/playlists`, 30-second preview URLs.
 
+**Batch lookups, measured closed to this app (R-037 F1, recorded by R-039).** Two batch endpoints have been
+tried and both returned **403 `Forbidden`**, each against a working single-id control:
+
+| Endpoint | Measured | Single-id control |
+|---|---|---|
+| `GET /artists?ids=` | 403, spot-main-R-004, 2026-09-14 | `GET /artists/{id}` 200 |
+| `GET /tracks?ids=` | 403, spot-main-R-037, 2026-09-14 (httpx and curl; 5 ids, 1 id, `market=from_token`) | `GET /tracks/{id}` 200 |
+
+That is two endpoints, for this app, on that date, not a claim about every batch endpoint. Until another
+is measured, the cost model is **one call per id at ~1 call/s**.
+
 > [!CAUTION]
 > **Artist `genres` is gone, not deprecated. Measured 2026-09-14 (spot-main-R-004 §1):** the `genres`
 > key is **absent from 55 of 55 artist objects** across `GET /artists/{id}` (45 artists, every one in
@@ -381,6 +392,11 @@ A round is not complete until all of these are true:
 - **A guard was proven to fail.** Every round that adds a test or constraint stages a break, records
   which named test went red, and reverts. "The tests pass" is not evidence; "test_play_event_grain
   failed with N duplicate keys when I removed the dedupe" is.
+- **A staged break is always followed by a full `make dbt-build` before the round reports** (R-037 F4,
+  recorded by R-039). A selective `dbt build -s <view>` drops every view downstream of it until the next full
+  build: dbt-postgres swaps a view by renaming the old one and dropping it with `cascade`. Measured at R-037:
+  after `-s int_play_events__deduped`, `int_allocation_reconciliation` did not exist. Recoverable in a session
+  schema; in `analytics` it would break a reader mid-query.
 - A build report exists in the PM folder's `reports/` (path: the round contract) naming: files
   changed, contracts touched, the red-test evidence above, and anything the contract got wrong.
 

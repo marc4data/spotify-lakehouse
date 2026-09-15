@@ -278,13 +278,27 @@ def cmd_resolve_tracks(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        pending = len(tracks.track_ids_to_fetch(conn))
+        ranked = tracks.tracks_to_fetch(conn)
+        all_track_ms = sum(t.ms_played for t in tracks.export_track_totals(conn).values())
+        pending = len(ranked)
         calls = pending if args.limit is None else min(args.limit, pending)
         hours = calls * tracks.SECONDS_PER_CALL_ESTIMATE / 3600
         print(
             f"spot resolve-tracks  profile={profile}  unresolved export track ids: {pending}  "
             f"this run: {calls} GET /tracks/{{id}} call(s), ~{hours:.1f} h at 1 call/s"
         )
+        checkpoints = (*tracks.COVERAGE_CHECKPOINTS, *([args.limit] if args.limit else []))
+        print(
+            "most-listened first. What the first N calls buy (ms_played from raw.export_record):\n"
+            "  calls   % of unresolved ms_played   % of unresolved plays   "
+            "% of all export track ms_played   hours at 1 call/s"
+        )
+        for row in tracks.coverage_table(ranked, all_track_ms, checkpoints):
+            print(
+                f"  {row.calls:>6,}   {row.pct_unresolved_ms:>25.1f}   "
+                f"{row.pct_unresolved_plays:>21.1f}   {row.pct_all_track_ms:>31.1f}   "
+                f"{row.hours:>17.2f}"
+            )
         if not args.run:
             print(
                 "dry run: no API call made. Batch GET /tracks?ids= returns 403 to this app "
@@ -293,9 +307,13 @@ def cmd_resolve_tracks(args: argparse.Namespace) -> int:
             return 0
         with SpotifyClient.for_profile(profile, settings) as api:
             summary = tracks.resolve(api, conn, profile, run_id, limit=args.limit)
+            http_calls = api.calls
+    coverage = 100 * summary.resolved_ms / (summary.unresolved_ms_at_start or 1)
     print(
-        f"to fetch {summary.to_fetch}: resolved {summary.resolved}, not found {summary.not_found}, "
-        f"failed {summary.failed} (retried next run), relinked {summary.relinked}"
+        f"run_id {run_id}  to fetch {summary.to_fetch}: resolved {summary.resolved}, not found "
+        f"{summary.not_found}, failed {summary.failed} (retried next run), relinked "
+        f"{summary.relinked}; coverage {coverage:.1f}% of unresolved ms_played; "
+        f"HTTP calls sent {http_calls}"
     )
     return 0
 

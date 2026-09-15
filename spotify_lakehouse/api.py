@@ -66,6 +66,7 @@ class SpotifyClient:
         self._sleep = sleep
         self._clock = clock
         self._last_call: float | None = None
+        self.calls = 0  # HTTP requests actually sent, retries included (R-039 reports it)
 
     @classmethod
     def for_profile(cls, profile: str, settings: Settings, **kwargs: Any) -> SpotifyClient:
@@ -97,6 +98,7 @@ class SpotifyClient:
             self._pace()
             headers = {"Authorization": f"Bearer {self._token_provider()}"}
             resp = self._http.get(path, params=params, headers=headers)
+            self.calls += 1
             self._last_call = self._clock()
             status = resp.status_code
 
