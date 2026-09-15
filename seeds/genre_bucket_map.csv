@@ -10,8 +10,8 @@ roots rock,rock,56.99
 blues rock,rock,45.29
 folk rock,rock,43.22
 indie rock,alt / indie rock,43.17
-folk,other,38.94
-singer-songwriter,other,36.00
+folk,folk / singer-songwriter,38.94
+singer-songwriter,folk / singer-songwriter,36.00
 soft rock,rock,35.99
 funk,r&b / soul,32.67
 r&b,r&b / soul,31.02
@@ -24,7 +24,7 @@ hardcore hip hop,hip-hop / rap,22.96
 southern rock,rock,20.83
 psychedelic rock,rock,20.79
 east coast hip hop,hip-hop / rap,20.56
-folk pop,other,20.35
+folk pop,folk / singer-songwriter,20.35
 acoustic rock,rock,19.74
 conscious hip hop,hip-hop / rap,19.16
 boom bap,hip-hop / rap,19.03
@@ -41,7 +41,7 @@ blues,jazz / blues,13.14
 alternative hip hop,hip-hop / rap,11.58
 rock and roll,rock,11.52
 reggae,other,11.20
-contemporary folk,other,10.54
+contemporary folk,folk / singer-songwriter,10.54
 electronic,electronic / dance,10.34
 quiet storm,r&b / soul,9.32
 political hip hop,hip-hop / rap,9.16
@@ -98,10 +98,10 @@ reggae rock,other,3.67
 hip hop soul,r&b / soul,3.62
 dancehall,other,3.59
 electropop,pop,3.30
-chamber folk,other,3.27
+chamber folk,folk / singer-songwriter,3.27
 vocal jazz,jazz / blues,3.26
 ska,other,3.20
-indie folk,other,3.17
+indie folk,folk / singer-songwriter,3.17
 boogie,r&b / soul,3.14
 bluegrass,country / americana,2.98
 british rhythm & blues,other,2.94
@@ -144,7 +144,7 @@ easy listening,other,1.15
 synth-pop,pop,1.13
 art punk,alt / indie rock,1.13
 power pop,pop,1.12
-alternative folk,other,1.11
+alternative folk,folk / singer-songwriter,1.11
 trap soul,r&b / soul,1.10
 psychedelic soul,r&b / soul,1.10
 snap,hip-hop / rap,1.04

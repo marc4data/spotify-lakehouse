@@ -980,22 +980,28 @@ def emit_reconciliation(ctx: Any, plays: pd.DataFrame, cov: Coverage) -> None:
 
 # --- §4.2–§4.4 Genre buckets (R-015) -------------------------------------------------------------
 
-# Colour by position in dim_genre_bucket's fixed order, so a renamed bucket keeps its colour.
-# `other` is always grey.
-BUCKET_PALETTE = (
-    "#1f77b4",
-    "#e377c2",
-    "#d62728",
-    "#ff7f0e",
-    "#8c564b",
-    "#bcbd22",
-    "#9467bd",
-    "#17becf",
-    "#2ca02c",
-    "#1b9e77",
-    "#7570b3",
-    "#e7298a",
-)
+# One colour per bucket name (spec §2's chart contract: fixed colours, so year-over-year small
+# multiples stay comparable). Keyed by name rather than position, so inserting a bucket — R-048 put
+# `folk / singer-songwriter` seventh — leaves every other bucket's colour where it was. A bucket the
+# seed adds later, with no entry here, falls back to BUCKET_PALETTE by position. `other` stays grey.
+BUCKET_COLORS = {
+    "hip-hop / rap": "#1f77b4",
+    "pop": "#e377c2",
+    "rock": "#d62728",
+    "alt / indie rock": "#ff7f0e",
+    "hard rock / metal": "#8c564b",
+    "country / americana": "#bcbd22",
+    # Dark navy: its radar neighbours are country / americana (olive) and r&b / soul (purple),
+    # with rock (red) nearby (R-048).
+    "folk / singer-songwriter": "#393b79",
+    "r&b / soul": "#9467bd",
+    "electronic / dance": "#17becf",
+    "latin": "#2ca02c",
+    "jazz / blues": "#1b9e77",
+    "classical": "#7570b3",
+    "spoken / comedy": "#e7298a",
+}
+BUCKET_PALETTE = tuple(BUCKET_COLORS.values())
 OTHER_COLOR = "#b0b0b0"
 RADAR_COLOR = "#1f3b73"
 SUNBURST_TOP_ARTISTS = 5
@@ -1013,8 +1019,10 @@ ALLOCATION_COLUMNS = [
 
 
 def bucket_colors(buckets: list[str]) -> dict[str, str]:
-    others = [b for b in buckets if b != "other"]
-    colors = {b: BUCKET_PALETTE[i % len(BUCKET_PALETTE)] for i, b in enumerate(others)}
+    """A colour per bucket: its own if the list knows it, else the palette by position."""
+    colors = {}
+    for index, bucket in enumerate(b for b in buckets if b != "other"):
+        colors[bucket] = BUCKET_COLORS.get(bucket, BUCKET_PALETTE[index % len(BUCKET_PALETTE)])
     colors["other"] = OTHER_COLOR
     return colors
 

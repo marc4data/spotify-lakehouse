@@ -235,11 +235,18 @@ reads a radar chart with 4,000 spokes.
 **`dim_genre`** — one row per distinct raw genre string ever observed.
 **`dim_genre_bucket`** — the analysis taxonomy. **Marc owns this list; it is a business definition.**
 
-Proposed buckets (see §6 — this needs Marc's sign-off before the mapping is built):
+Buckets, signed off by Marc 2026-09-14 and amended to 14 by spot-main-R-048:
 
 `hip-hop / rap` · `pop` · `rock` · `alt / indie rock` · `hard rock / metal` · `country / americana` ·
-`r&b / soul` · `electronic / dance` · `latin` · `jazz / blues` · `classical` · `spoken / comedy` ·
-`other`
+`folk / singer-songwriter` · `r&b / soul` · `electronic / dance` · `latin` · `jazz / blues` ·
+`classical` · `spoken / comedy` · `other`
+
+> [!NOTE]
+> **`folk / singer-songwriter` added 2026-09-15 (R-048), on Marc's decision "Add to Folk".** R-015 measured
+> the hole: seven folk strings carrying 113.4 h, 5.94% of allocated listening time, all sitting in `other`
+> because the 13-bucket list had nowhere for them. The name pairs the genre with its nearest neighbour, as
+> the other labels do; it is a one-line seed edit if Marc prefers another. It sits between
+> `country / americana` and `r&b / soul` so related families stay adjacent on the radar.
 
 > [!NOTE]
 > Marc's original list separated `rap` from `hip-hop`. Spotify's taxonomy does not — it emits
