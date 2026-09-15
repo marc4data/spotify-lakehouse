@@ -1,0 +1,238 @@
+genre_name,bucket_name,hours
+rock,rock,132.76
+hip hop,hip-hop / rap,118.42
+pop rock,rock,80.00
+alternative rock,alt / indie rock,77.38
+pop,pop,59.37
+contemporary r&b,r&b / soul,58.97
+soul,r&b / soul,57.24
+roots rock,rock,56.99
+blues rock,rock,45.29
+folk rock,rock,43.22
+indie rock,alt / indie rock,43.17
+folk,other,38.94
+singer-songwriter,other,36.00
+soft rock,rock,35.99
+funk,r&b / soul,32.67
+r&b,r&b / soul,31.02
+hard rock,hard rock / metal,30.50
+classic rock,rock,29.67
+pop rap,hip-hop / rap,29.10
+country,country / americana,27.85
+gangsta rap,hip-hop / rap,23.64
+hardcore hip hop,hip-hop / rap,22.96
+southern rock,rock,20.83
+psychedelic rock,rock,20.79
+east coast hip hop,hip-hop / rap,20.56
+folk pop,other,20.35
+acoustic rock,rock,19.74
+conscious hip hop,hip-hop / rap,19.16
+boom bap,hip-hop / rap,19.03
+country rock,country / americana,17.25
+disco,other,16.79
+pop soul,r&b / soul,16.70
+americana,country / americana,16.27
+dance-pop,pop,15.18
+southern hip hop,hip-hop / rap,14.09
+west coast hip hop,hip-hop / rap,13.96
+progressive rock,rock,13.65
+art rock,rock,13.38
+blues,jazz / blues,13.14
+alternative hip hop,hip-hop / rap,11.58
+rock and roll,rock,11.52
+reggae,other,11.20
+contemporary folk,other,10.54
+electronic,electronic / dance,10.34
+quiet storm,r&b / soul,9.32
+political hip hop,hip-hop / rap,9.16
+smooth soul,r&b / soul,8.72
+jam band,rock,8.31
+funk rock,rock,7.80
+experimental rock,rock,7.76
+grunge,alt / indie rock,7.63
+heartland rock,rock,7.58
+trap,hip-hop / rap,7.58
+classical,classical,7.09
+neo soul,r&b / soul,7.06
+arena rock,rock,6.69
+baroque pop,pop,6.67
+aor,rock,6.43
+jazz-funk,jazz / blues,6.35
+alternative pop,pop,6.32
+indie pop,pop,6.28
+symphonic rock,rock,6.21
+acid rock,rock,6.02
+blue-eyed soul,r&b / soul,5.98
+post-grunge,alt / indie rock,5.95
+synth funk,r&b / soul,5.88
+boogie rock,rock,5.78
+crunk,hip-hop / rap,5.61
+new jack swing,r&b / soul,5.58
+motown,r&b / soul,5.54
+jazz rap,hip-hop / rap,5.54
+punk rock,alt / indie rock,5.45
+piano rock,rock,5.43
+alternative metal,hard rock / metal,5.42
+dance,electronic / dance,5.39
+heavy metal,hard rock / metal,5.34
+rap rock,other,5.30
+psychedelic pop,pop,5.13
+outlaw country,country / americana,4.97
+christmas music,other,4.97
+electro,electronic / dance,4.88
+glam metal,hard rock / metal,4.61
+progressive,other,4.60
+psychedelic,other,4.60
+rock opera,rock,4.60
+space rock,rock,4.60
+jazz,jazz / blues,4.55
+funk metal,hard rock / metal,4.41
+new wave,alt / indie rock,4.41
+house,electronic / dance,4.32
+g-funk,hip-hop / rap,4.16
+dirty south,hip-hop / rap,3.89
+horrorcore,hip-hop / rap,3.85
+trip hop,electronic / dance,3.73
+glam rock,rock,3.69
+reggae rock,other,3.67
+hip hop soul,r&b / soul,3.62
+dancehall,other,3.59
+electropop,pop,3.30
+chamber folk,other,3.27
+vocal jazz,jazz / blues,3.26
+ska,other,3.20
+indie folk,other,3.17
+boogie,r&b / soul,3.14
+bluegrass,country / americana,2.98
+british rhythm & blues,other,2.94
+experimental hip hop,hip-hop / rap,2.90
+country folk,country / americana,2.79
+electronica,electronic / dance,2.79
+dub,other,2.64
+rapcore,hard rock / metal,2.64
+skacore,other,2.64
+ska punk,other,2.64
+progressive soul,r&b / soul,2.57
+post-punk,alt / indie rock,2.55
+club,electronic / dance,2.55
+alternative country,country / americana,2.54
+hardcore punk,alt / indie rock,2.53
+country pop,country / americana,2.49
+neo-psychedelia,alt / indie rock,2.38
+jazz pop,pop,2.38
+teen pop,pop,2.21
+alternative r&b,r&b / soul,2.16
+old school hip hop,hip-hop / rap,2.11
+yacht rock,rock,2.05
+electric blues,jazz / blues,1.81
+nashville sound,country / americana,1.77
+acid jazz,jazz / blues,1.73
+classic country,country / americana,1.63
+future bass,electronic / dance,1.61
+art pop,pop,1.59
+ballad,pop,1.54
+stomp and holler,country / americana,1.48
+metal,hard rock / metal,1.48
+nu metal,hard rock / metal,1.45
+rap metal,hard rock / metal,1.45
+orchestral,classical,1.42
+deep soul,r&b / soul,1.27
+dance-rock,rock,1.23
+country blues,jazz / blues,1.16
+downtempo,electronic / dance,1.15
+easy listening,other,1.15
+synth-pop,pop,1.13
+art punk,alt / indie rock,1.13
+power pop,pop,1.12
+alternative folk,other,1.11
+trap soul,r&b / soul,1.10
+psychedelic soul,r&b / soul,1.10
+snap,hip-hop / rap,1.04
+jazz rock,jazz / blues,1.04
+turntablism,hip-hop / rap,1.03
+alternative dance,electronic / dance,1.00
+instrumental hip hop,hip-hop / rap,0.96
+cowboy poetry,spoken / comedy,0.93
+cowpunk,other,0.93
+pigfuck,alt / indie rock,0.93
+punk,alt / indie rock,0.93
+acoustic blues,jazz / blues,0.92
+traditional pop,pop,0.91
+instrumental rock,rock,0.89
+gospel,other,0.87
+progressive country,country / americana,0.85
+post-hardcore,alt / indie rock,0.83
+slacker rock,alt / indie rock,0.83
+industrial rock,alt / indie rock,0.82
+sophisti-pop,pop,0.80
+surf,rock,0.79
+nu disco,electronic / dance,0.78
+afrobeats,other,0.78
+reggae-pop,other,0.78
+tropical house,electronic / dance,0.78
+edm,electronic / dance,0.73
+electro house,electronic / dance,0.73
+afrobeat,other,0.72
+jùjú,other,0.72
+latin,latin,0.71
+red dirt,country / americana,0.70
+contemporary jazz,jazz / blues,0.65
+crossover jazz,jazz / blues,0.65
+afro house,electronic / dance,0.62
+big band,jazz / blues,0.59
+hip house,electronic / dance,0.55
+hyphy,hip-hop / rap,0.55
+mobb music,hip-hop / rap,0.55
+rockabilly,rock,0.48
+british blues,jazz / blues,0.45
+christian hip hop,hip-hop / rap,0.43
+sludge metal,hard rock / metal,0.42
+experimental,other,0.42
+britpop,alt / indie rock,0.41
+mainstream rock,rock,0.41
+merseybeat,rock,0.41
+uk funky,electronic / dance,0.41
+deep house,electronic / dance,0.40
+bolero,latin,0.39
+latin pop,latin,0.39
+latin soul,latin,0.39
+calypso,other,0.36
+tropical rock,other,0.36
+dream pop,alt / indie rock,0.35
+shoegaze,alt / indie rock,0.35
+bubblegum pop,pop,0.33
+doo-wop,r&b / soul,0.33
+amapiano,electronic / dance,0.32
+swamp rock,rock,0.31
+pub rock,rock,0.28
+organic house,electronic / dance,0.27
+chipmunk soul,hip-hop / rap,0.25
+punk blues,other,0.23
+contemporary gospel,other,0.18
+drum and bass,electronic / dance,0.18
+funk brasileiro,latin,0.18
+traditional country,country / americana,0.17
+electroclash,electronic / dance,0.15
+electronic rock,other,0.15
+french electro,electronic / dance,0.15
+french house,electronic / dance,0.15
+jackin house,electronic / dance,0.15
+techno,electronic / dance,0.15
+minneapolis sound,r&b / soul,0.12
+smooth jazz,jazz / blues,0.11
+nu jazz,jazz / blues,0.03
+afro-cuban jazz,latin,
+ambient dub,electronic / dance,
+ambient techno,electronic / dance,
+big beat,electronic / dance,
+bossa nova,latin,
+breakbeat,electronic / dance,
+chillout,electronic / dance,
+cloud rap,hip-hop / rap,
+idm,electronic / dance,
+latin jazz,latin,
+lounge,other,
+mpb,latin,
+roots reggae,other,
+samba,latin,
+world fusion,other,

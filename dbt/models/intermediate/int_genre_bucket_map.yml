@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: int_genre_bucket_map
+    description: >
+      One row per curated genre string with its bucket; unlisted strings fall to `other` with is_mapped false
+      (data-contracts §3, R-015).
+    columns:
+      - name: genre_key
+        tests: [unique, not_null]
+      - name: bucket_name
+        tests: [not_null]

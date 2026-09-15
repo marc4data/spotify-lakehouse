@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: dim_genre_bucket
+    description: >
+      One row per analysis bucket, from seeds/genre_bucket.csv (data-contracts §3, R-015). `other` is a bucket:
+      genres the mapping sends there, or does not list. Artist-has-no-genre time is not `other`; it is the
+      reconciliation's unclassified residual and belongs to no bucket.
+    columns:
+      - name: genre_bucket_key
+        tests: [unique, not_null]
+      - name: bucket_name
+        tests:
+          - unique
+          - not_null

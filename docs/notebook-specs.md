@@ -130,7 +130,7 @@ Section 7 is the map from API surface to warehouse model.
 
 ---
 
-## 2. `02_listening_patterns.ipynb` — Marc's listening
+## 2. `02_listening_patterns.ipynb` — one profile's listening
 
 **Purpose:** the actual analysis. Reads the marts, not the API.
 
@@ -147,7 +147,10 @@ Section 7 is the map from API surface to warehouse model.
     reader sees them before any chart.]
 
 ## 2. Volume Over Time
-### 2.1 Daily listening minutes                       [line, 7-day rolling overlay]
+### 2.1 Daily listening minutes                       [line of average minutes per day; daily with a
+                                                       7-day rolling mean for a window up to two years,
+                                                       weekly with a 13-week rolling mean beyond (the
+                                                       grain rule below; built weekly, R-009 F11)]
 ### 2.2 Monthly totals                                [bar]
 ### 2.3 By day of week and daypart                    [heatmap: dow × daypart]
 ### 2.4 Play count vs. qualified plays                [both series; the gap is the skip rate]
@@ -194,8 +197,11 @@ Section 7 is the map from API surface to warehouse model.
                                                        section's own text says why]
 ```
 
-**§4.2–§4.4 wait on R-015.** They render as stated placeholders naming R-015 until the 13-bucket seed
-mapping exists. Raw genre strings are not a substitute for buckets, and the sections are not omitted.
+**§4.2–§4.4 are built on the bucket seed (R-015).** They read `int_genre_bucket_allocation`, which maps
+curated genres through `seeds/genre_bucket_map.csv` (unlisted genres fall to `other`). Each radar prints the
+reconciliation's four steps and three gaps, the share of the period's music time it is drawn on, and the
+`unclassified` footnote. §4.4 is one self-contained plotly figure: a sunburst of bucket → genre → top
+artists, with a menu of periods pre-computed into it, so it works from `file://` with no server.
 
 **Choosing the profile (R-009).** The notebook's first cell is `ctx = setup()`, with no literal:
 `setup()` takes its profile from the `SPOT_PROFILE` environment variable (default `marc` when unset).

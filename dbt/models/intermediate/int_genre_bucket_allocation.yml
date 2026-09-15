@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: int_genre_bucket_allocation
+    description: >
+      Allocated listening per (profile, month, bucket, genre, artist): the bucket step of data-contracts §4
+      (R-015). Sums to int_allocation_reconciliation step 4 per profile
+      (tests/genre_bucket_allocation_matches_reconciliation.sql); `other` stays under 15% of it
+      (tests/genre_other_share_under_15_pct.sql).
+    columns:
+      - name: bucket_name
+        tests: [not_null]
+      - name: genre_key
+        tests: [not_null]

@@ -899,18 +899,30 @@ def emit_podcast_daypart(ctx: Any, plays: pd.DataFrame, cov: Coverage) -> None:
 # --- §4.1 Allocation reconciliation -------------------------------------------------------------
 
 
-def emit_reconciliation(ctx: Any, plays: pd.DataFrame, cov: Coverage) -> None:
+def _blank(frame: pd.DataFrame) -> pd.DataFrame:
+    """Show an empty cell where a value does not apply, rather than NaN (R-009 F12)."""
+    return frame.astype(object).where(frame.notna(), "")
+
+
+def reconciliation_steps(ctx: Any) -> pd.DataFrame:
+    """The profile's four allocation steps (data-contracts §4), with hours beside the ms."""
     steps = ctx.frame(
         "select step_number, step_name, play_count, ms_played, pct_rows_with_duration, "
         "residual_name, residual_play_count, residual_ms_played "
         "from {stg}.int_allocation_reconciliation where profile_slug = %s order by step_number",
         (ctx.profile,),
     )
+    if not steps.empty:
+        steps["hours"] = steps["ms_played"].astype(float) / MS_PER_HOUR
+        steps["residual_hours"] = steps["residual_ms_played"].astype(float) / MS_PER_HOUR
+    return steps
+
+
+def emit_reconciliation(ctx: Any, plays: pd.DataFrame, cov: Coverage) -> None:
+    steps = reconciliation_steps(ctx)
     if steps.empty:
         _callout("CAUTION", f"**{NO_DATA}.** The reconciliation has no rows for `{ctx.profile}`.")
         return
-    steps["hours"] = steps["ms_played"].astype(float) / MS_PER_HOUR
-    steps["residual_hours"] = steps["residual_ms_played"].astype(float) / MS_PER_HOUR
     total = steps.loc[steps["step_number"] == 1, "hours"].iloc[0]
     music = steps.loc[steps["step_number"] == 2, "hours"].iloc[0]
     steps["pct_of_total_time"] = 100 * steps["hours"] / total if total else np.nan
@@ -934,7 +946,7 @@ def emit_reconciliation(ctx: Any, plays: pd.DataFrame, cov: Coverage) -> None:
     ax.set_xlim(0, total * 1.45 if total else 1)
     plt.show()
     _show(
-        _tidy(steps)[
+        _blank(_tidy(steps))[
             [
                 "step_number",
                 "step_name",
@@ -963,6 +975,462 @@ def emit_reconciliation(ctx: Any, plays: pd.DataFrame, cov: Coverage) -> None:
         "response, which the genre join never reads; removing that gate moved genre-allocated time "
         "from 1.32% to 19.07% of music time **with no new data**. That time was always "
         "classifiable. What would genuinely raise step 3 is resolving more of the export's tracks.",
+    )
+
+
+# --- §4.2–§4.4 Genre buckets (R-015) -------------------------------------------------------------
+
+# Colour by position in dim_genre_bucket's fixed order, so a renamed bucket keeps its colour.
+# `other` is always grey.
+BUCKET_PALETTE = (
+    "#1f77b4",
+    "#e377c2",
+    "#d62728",
+    "#ff7f0e",
+    "#8c564b",
+    "#bcbd22",
+    "#9467bd",
+    "#17becf",
+    "#2ca02c",
+    "#1b9e77",
+    "#7570b3",
+    "#e7298a",
+)
+OTHER_COLOR = "#b0b0b0"
+RADAR_COLOR = "#1f3b73"
+SUNBURST_TOP_ARTISTS = 5
+ALLOCATION_COLUMNS = [
+    "month_start",
+    "year",
+    "bucket_name",
+    "bucket_order",
+    "genre_name",
+    "artist_name",
+    "allocated_ms",
+    "allocated_plays",
+    "rows_with_duration",
+]
+
+
+def bucket_colors(buckets: list[str]) -> dict[str, str]:
+    others = [b for b in buckets if b != "other"]
+    colors = {b: BUCKET_PALETTE[i % len(BUCKET_PALETTE)] for i, b in enumerate(others)}
+    colors["other"] = OTHER_COLOR
+    return colors
+
+
+def load_buckets(ctx: Any) -> list[str]:
+    rows = ctx.rows("select bucket_name from {mart}.dim_genre_bucket order by bucket_order")
+    return [row[0] for row in rows]
+
+
+def load_bucket_allocation(ctx: Any) -> pd.DataFrame:
+    """The profile's rows of int_genre_bucket_allocation, loaded once per context."""
+    cached = getattr(ctx, "_bucket_allocation", None)
+    if cached is not None:
+        return cached
+    frame = ctx.frame(
+        "select month_start, year, bucket_name, bucket_order, genre_name, "
+        "coalesce(artist_name, '(unnamed artist)') as artist_name, allocated_ms, allocated_plays, "
+        "rows_with_duration from {stg}.int_genre_bucket_allocation where profile_slug = %s",
+        (ctx.profile,),
+    )
+    if frame.empty:
+        frame = pd.DataFrame(columns=ALLOCATION_COLUMNS)
+    frame["month_start"] = pd.to_datetime(frame["month_start"])
+    for column in ("allocated_ms", "allocated_plays"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype(float)
+    ctx._bucket_allocation = frame
+    return frame
+
+
+def bucket_shares(allocation: pd.DataFrame, buckets: list[str]) -> pd.DataFrame:
+    """Each bucket's share of allocated music time, in the fixed order (spec §2: never raw ms)."""
+    grouped = allocation.groupby("bucket_name")
+    ms = grouped["allocated_ms"].sum(min_count=1).reindex(buckets)
+    plays = grouped["allocated_plays"].sum().reindex(buckets).fillna(0.0)
+    total = float(ms.sum())
+    shares = 100 * ms.fillna(0) / total if total else pd.Series(np.nan, index=ms.index)
+    return pd.DataFrame(
+        {
+            "bucket": buckets,
+            "allocated_ms": ms.to_numpy(),
+            "hours": (ms / MS_PER_HOUR).to_numpy(),
+            "share_pct": shares.to_numpy(),
+            "allocated_plays": plays.to_numpy(),
+        }
+    )
+
+
+SUNBURST_COLUMNS = ["id", "label", "parent", "value", "bucket"]
+
+
+def sunburst_nodes(
+    allocation: pd.DataFrame, period: str, top_artists: int = SUNBURST_TOP_ARTISTS
+) -> pd.DataFrame:
+    """bucket → genre → top artists, in hours; every parent is exactly the sum of its children.
+
+    plotly's branchvalues="total" needs that, and it is what makes a click on a slice show the
+    whole of that slice. Artists past `top_artists` in a genre are grouped into one leaf.
+    """
+    frame = allocation.assign(hours=allocation["allocated_ms"].fillna(0) / MS_PER_HOUR)
+    artists = frame.groupby(["bucket_name", "genre_name", "artist_name"], as_index=False)[
+        "hours"
+    ].sum()
+    artists = artists[artists["hours"] > 0]
+    leaves = []
+    for (bucket, genre), group in artists.groupby(["bucket_name", "genre_name"], sort=False):
+        ranked = group.sort_values(["hours", "artist_name"], ascending=[False, True])
+        genre_id = f"{period}|{bucket}|{genre}"
+        for row in ranked.head(top_artists).itertuples():
+            leaves.append(
+                (
+                    f"{genre_id}|{row.artist_name}",
+                    row.artist_name,
+                    genre_id,
+                    row.hours,
+                    bucket,
+                    genre,
+                )
+            )
+        rest = ranked.iloc[top_artists:]
+        if not rest.empty:
+            noun = "artist" if len(rest) == 1 else "artists"
+            leaves.append(
+                (
+                    f"{genre_id}|…rest",
+                    f"{len(rest)} other {noun}",
+                    genre_id,
+                    float(rest["hours"].sum()),
+                    bucket,
+                    genre,
+                )
+            )
+    leaf_frame = pd.DataFrame(leaves, columns=[*SUNBURST_COLUMNS, "genre"])
+    genres = (
+        leaf_frame.groupby(["parent", "bucket", "genre"], as_index=False, sort=False)["value"]
+        .sum()
+        .rename(columns={"parent": "id", "genre": "label"})
+    )
+    genres["parent"] = period + "|" + genres["bucket"]
+    buckets = (
+        genres.groupby(["parent", "bucket"], as_index=False, sort=False)["value"]
+        .sum()
+        .rename(columns={"parent": "id"})
+    )
+    buckets["label"] = buckets["bucket"]
+    buckets["parent"] = ""
+    nodes = pd.concat([buckets, genres, leaf_frame.drop(columns=["genre"])], ignore_index=True)
+    return nodes[SUNBURST_COLUMNS]
+
+
+def trailing_months(cov: Coverage, months: int = 12) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """First and last month start of the trailing window ending in the export's last month."""
+    last = pd.Timestamp(cov.window[1]).to_period("M").start_time
+    return last - pd.DateOffset(months=months - 1), last
+
+
+def _bucket_inputs(ctx: Any, cov: Coverage, what: str) -> tuple[pd.DataFrame, list[str]] | None:
+    if cov.window is None:
+        _callout(
+            "CAUTION",
+            f"**{NO_DATA}.** {what} needs listening time, which only the export carries, and none "
+            f"is loaded for `{ctx.profile}` (§1).",
+        )
+        return None
+    allocation = load_bucket_allocation(ctx)
+    if allocation.empty or not allocation["allocated_ms"].fillna(0).sum():
+        _callout(
+            "CAUTION",
+            f"**{NO_DATA}.** No music time for `{ctx.profile}` reaches a genre bucket yet (§4.1).",
+        )
+        return None
+    return allocation, load_buckets(ctx)
+
+
+def _in_months(frame: pd.DataFrame, column: str, first: pd.Timestamp, last: pd.Timestamp) -> Any:
+    months = period_start(frame[column], "month") if column == "full_date" else frame[column]
+    return (months >= first) & (months <= last)
+
+
+def _print_reconciliation(
+    ctx: Any,
+    plays: pd.DataFrame,
+    allocation: pd.DataFrame,
+    first: pd.Timestamp,
+    last: pd.Timestamp,
+    period: str,
+) -> None:
+    """What every radar prints (spec §2, §4.1): the chain, its three gaps, the period's share."""
+    steps = reconciliation_steps(ctx)
+    if steps.empty:
+        _callout("CAUTION", f"**{NO_DATA}.** No reconciliation for `{ctx.profile}` (§4.1).")
+        return
+    by_step = steps.set_index("step_number")
+    music_hours = by_step.loc[2, "hours"]
+    chain = pd.DataFrame(
+        {
+            "step": [
+                f"{n} {name}" for n, name in zip(by_step.index, by_step["step_name"], strict=True)
+            ],
+            "hours": by_step["hours"].round(1).to_numpy(),
+            "pct_of_music_time": [
+                round(100 * h / music_hours, 2) if n >= 2 and music_hours else None
+                for n, h in zip(by_step.index, by_step["hours"], strict=True)
+            ],
+            "gap": [
+                str(r).split(" (")[0] if pd.notna(r) else None for r in by_step["residual_name"]
+            ],
+            "gap_hours": by_step["residual_hours"].round(1).to_numpy(),
+        }
+    )
+    music = plays[(plays["source_system"] == "export") & (plays["category"] == "music")]
+    period_music = music.loc[_in_months(music, "full_date", first, last), "ms_played"].sum()
+    period_allocated = allocation.loc[
+        _in_months(allocation, "month_start", first, last), "allocated_ms"
+    ].sum()
+    share = 100 * period_allocated / period_music if period_music else float("nan")
+    unclassified = by_step.loc[4, "residual_hours"]
+    _callout(
+        "WARNING",
+        f"**This is drawn on {share:.2f}% of the period's music time**: "
+        f"{period_allocated / MS_PER_HOUR:,.0f} of {period_music / MS_PER_HOUR:,.0f} h, {period}. "
+        "It describes the music whose primary artist is identified and has a MusicBrainz genre, "
+        "not all listening. The chain over the whole export window, with the three gaps:",
+    )
+    _show(_blank(chain))
+    _md(
+        f"*Unclassified:* {unclassified:,.1f} h of artist-identified music belongs to artists with "
+        "no MusicBrainz genre. It is in no bucket, and not in `other`, which holds only genres "
+        "the mapping sends there or does not list (data-contracts §4)."
+    )
+
+
+def _radar(
+    ax: Any, shares: pd.DataFrame, ceiling: float | None = None, labels: bool = True
+) -> None:
+    values = shares["share_pct"].fillna(0).to_numpy(dtype=float)
+    angles = np.linspace(0, 2 * np.pi, len(values), endpoint=False)
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.plot(
+        np.append(angles, angles[0]), np.append(values, values[0]), color=RADAR_COLOR, linewidth=1.5
+    )
+    ax.fill(
+        np.append(angles, angles[0]), np.append(values, values[0]), color=RADAR_COLOR, alpha=0.25
+    )
+    ax.set_xticks(angles, list(shares["bucket"]) if labels else [""] * len(values), fontsize=8)
+    ax.set_ylim(0, ceiling or max(5.0, float(values.max()) * 1.1))
+    ax.tick_params(axis="y", labelsize=6)
+
+
+def emit_bucket_radar(ctx: Any, plays: pd.DataFrame, cov: Coverage) -> None:
+    inputs = _bucket_inputs(ctx, cov, "The genre radar")
+    if inputs is None:
+        return
+    allocation, buckets = inputs
+    first, last = trailing_months(cov)
+    period = allocation[_in_months(allocation, "month_start", first, last)]
+    label = f"the trailing twelve months, {first:%Y-%m} → {last:%Y-%m}"
+    _print_reconciliation(ctx, plays, allocation, first, last, label)
+    shares = bucket_shares(period, buckets)
+    plt = _plt()
+    fig = plt.figure(figsize=(7.5, 7.5))
+    ax = fig.add_subplot(projection="polar")
+    _radar(ax, shares)
+    ax.set_title(f"Share of allocated music time, {first:%Y-%m} → {last:%Y-%m}", pad=24)
+    plt.show()
+    if last + pd.offsets.MonthEnd(0) > pd.Timestamp(cov.window[1]):
+        _md(
+            f"{last:%B %Y} is a partial month: the export ends on {cov.window[1]:%Y-%m-%d}. As a "
+            "share, not a total, it cannot read as a drop."
+        )
+    _md("**The underlying time**, bucket by bucket in the chart's order (spokes run clockwise).")
+    table = shares.assign(
+        allocated_ms=shares["allocated_ms"].round(0),
+        hours=shares["hours"].round(1),
+        share_pct=shares["share_pct"].round(2),
+        allocated_plays=shares["allocated_plays"].round(1),
+    )
+    _show(_blank(table))
+
+
+def emit_bucket_longitudinal(ctx: Any, plays: pd.DataFrame, cov: Coverage) -> None:
+    inputs = _bucket_inputs(ctx, cov, "The yearly genre radars")
+    if inputs is None:
+        return
+    allocation, buckets = inputs
+    window_first = pd.Timestamp(cov.window[0]).to_period("M").start_time
+    window_last = pd.Timestamp(cov.window[1]).to_period("M").start_time
+    _print_reconciliation(
+        ctx, plays, allocation, window_first, window_last, "over the whole export window"
+    )
+    year_list = sorted(int(y) for y in allocation["year"].dropna().unique())
+    years = clip_to_window(
+        pd.DataFrame({"period": [pd.Timestamp(year=y, month=1, day=1) for y in year_list]}),
+        "year",
+        cov.window,
+    )
+    shares = {
+        row.period.year: bucket_shares(allocation[allocation["year"] == row.period.year], buckets)
+        for row in years.itertuples()
+    }
+    ceiling = max(float(s["share_pct"].fillna(0).max()) for s in shares.values()) * 1.05
+    partial = {row.period.year for row in years.itertuples() if row.is_partial}
+    plt = _plt()
+    columns = 4
+    rows = math.ceil(len(shares) / columns)
+    fig = plt.figure(figsize=(12, 3.3 * rows))
+    for index, (year, frame) in enumerate(shares.items()):
+        ax = fig.add_subplot(rows, columns, index + 1, projection="polar")
+        _radar(ax, frame, ceiling=ceiling, labels=False)
+        hours = frame["hours"].sum()
+        ax.set_title(
+            f"{year}{' (partial)' if year in partial else ''} · {hours:,.0f} h", fontsize=9
+        )
+    plt.tight_layout()
+    plt.show()
+    _md(
+        "Every radar uses the same scale and the same spoke order, clockwise from the top: "
+        + ", ".join(f"`{b}`" for b in buckets)
+        + "."
+    )
+    colors = bucket_colors(buckets)
+    matrix = pd.DataFrame(
+        {year: frame.set_index("bucket")["share_pct"] for year, frame in shares.items()}
+    )
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    ax.stackplot(
+        list(matrix.columns),
+        [matrix.loc[b].fillna(0).to_numpy() for b in buckets],
+        labels=buckets,
+        colors=[colors[b] for b in buckets],
+    )
+    for year in partial:
+        ax.axvspan(year - 0.5, year + 0.5, color="white", alpha=0.45, zorder=3)
+        ax.text(year, 101, "partial", ha="center", fontsize=7, color="0.4")
+    ax.set_ylim(0, 106)
+    ax.set_ylabel("% of allocated music time")
+    ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), fontsize=8)
+    plt.show()
+    music = plays[(plays["source_system"] == "export") & (plays["category"] == "music")]
+    coverage = pd.DataFrame(
+        {
+            "music_hours": music.groupby("year")["ms_played"].sum() / MS_PER_HOUR,
+            "allocated_hours": allocation.groupby("year")["allocated_ms"].sum() / MS_PER_HOUR,
+            "allocated_plays": allocation.groupby("year")["allocated_plays"].sum(),
+        }
+    ).reindex(list(shares))
+    coverage["pct_of_music_time_allocated"] = (
+        100 * coverage["allocated_hours"] / coverage["music_hours"]
+    )
+    coverage["partial_year"] = [year in partial for year in coverage.index]
+    _md("**How much of each year these shapes describe.**")
+    _show(_blank(coverage.round(1).reset_index(names="year")))
+
+
+def _drilldown_figure(buckets: list[str], periods: list[tuple[str, pd.DataFrame]]) -> Any:
+    import plotly.graph_objects as go
+
+    colors = bucket_colors(buckets)
+    figure = go.Figure()
+    for index, (label, frame) in enumerate(periods):
+        nodes = sunburst_nodes(frame, label)
+        figure.add_trace(
+            go.Sunburst(
+                ids=nodes["id"],
+                labels=nodes["label"],
+                parents=nodes["parent"],
+                values=nodes["value"],
+                branchvalues="total",
+                maxdepth=2,
+                marker={"colors": [colors.get(b, OTHER_COLOR) for b in nodes["bucket"]]},
+                hovertemplate="<b>%{label}</b><br>%{value:,.1f} h"
+                "<br>%{percentRoot:.1%} of the period<extra></extra>",
+                name=label,
+                visible=index == 0,
+            )
+        )
+    buttons = [
+        {
+            "label": label,
+            "method": "update",
+            "args": [
+                {"visible": [i == j for j in range(len(periods))]},
+                {"title": {"text": f"Allocated music time: {label}"}},
+            ],
+        }
+        for i, (label, _) in enumerate(periods)
+    ]
+    figure.update_layout(
+        title={"text": f"Allocated music time: {periods[0][0]}"},
+        updatemenus=[
+            {
+                "buttons": buttons,
+                "direction": "down",
+                "x": 0,
+                "xanchor": "left",
+                "y": 1.1,
+                "yanchor": "top",
+            }
+        ],
+        margin={"t": 90, "l": 10, "r": 10, "b": 10},
+        height=680,
+    )
+    return figure
+
+
+def emit_bucket_drilldown(ctx: Any, plays: pd.DataFrame, cov: Coverage) -> None:
+    inputs = _bucket_inputs(ctx, cov, "The genre drill-down")
+    if inputs is None:
+        return
+    allocation, buckets = inputs
+    first, last = trailing_months(cov)
+    candidates = [
+        (
+            f"trailing 12 months ({first:%Y-%m} → {last:%Y-%m})",
+            allocation[_in_months(allocation, "month_start", first, last)],
+        ),
+        ("all years", allocation),
+    ] + [
+        (str(int(year)), allocation[allocation["year"] == year])
+        for year in sorted(allocation["year"].dropna().unique(), reverse=True)
+    ]
+    periods = [
+        (label, frame) for label, frame in candidates if frame["allocated_ms"].fillna(0).sum()
+    ]
+    from IPython.display import HTML, display
+
+    figure = _drilldown_figure(buckets, periods)
+    display(
+        HTML(
+            figure.to_html(
+                full_html=False,
+                include_plotlyjs=True,
+                div_id="genre-drilldown",
+                config={"displaylogo": False, "responsive": True},
+            )
+        )
+    )
+    steps = reconciliation_steps(ctx)
+    share = (
+        100
+        * steps.loc[steps["step_number"] == 4, "hours"].iloc[0]
+        / steps.loc[steps["step_number"] == 2, "hours"].iloc[0]
+        if not steps.empty
+        else float("nan")
+    )
+    _md(
+        f"**{len(periods)} periods** in the menu. Under each genre, the top {SUNBURST_TOP_ARTISTS} "
+        "artists by allocated time, with the rest grouped. An artist appears under each of their "
+        "genres with that genre's share of their time (1/N), so one artist can sit in several "
+        "buckets. The plotly library is embedded in this page, so the chart needs no network."
+    )
+    _callout(
+        "WARNING",
+        f"Like the radars, this covers **{share:.2f}% of music time** over the whole window: music "
+        "whose primary artist is identified and has a genre (§4.1). The time outside it is not in "
+        "any slice, `other` included.",
     )
 
 
@@ -1419,6 +1887,9 @@ PANELS = (
     emit_podcast_leaderboard,
     emit_podcast_daypart,
     emit_reconciliation,
+    emit_bucket_radar,
+    emit_bucket_longitudinal,
+    emit_bucket_drilldown,
     emit_top_artists,
     emit_longest_tail,
     emit_one_hit_wonders,

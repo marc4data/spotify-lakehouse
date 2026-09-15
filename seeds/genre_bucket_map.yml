@@ -1,0 +1,24 @@
+version: 2
+
+seeds:
+  - name: genre_bucket_map
+    description: >
+      Curated MusicBrainz genre string -> bucket (data-contracts §3), columns genre_name, bucket_name. Marc owns
+      it and edits it in a spreadsheet; a genre it does not list falls to `other`. Rows are ordered by allocated
+      listening time, largest first, so the rows that carry the most hours are reviewed first. `hours` is for
+      review only: no model reads it (R-015).
+    config:
+      column_types:
+        genre_name: text
+        bucket_name: text
+        hours: numeric
+    columns:
+      - name: genre_name
+        tests: [unique, not_null]
+      - name: bucket_name
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('genre_bucket')
+                field: bucket_name

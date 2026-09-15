@@ -1,0 +1,16 @@
+version: 2
+
+seeds:
+  - name: genre_bucket
+    description: >
+      The analysis taxonomy (data-contracts §3): 13 buckets Marc signed off on 2026-09-14, hip-hop / rap as
+      one. bucket_order fixes the spoke order and colour of every radar. Marc owns this file (R-015).
+    config:
+      column_types:
+        bucket_order: integer
+        bucket_name: text
+    columns:
+      - name: bucket_order
+        tests: [unique, not_null]
+      - name: bucket_name
+        tests: [unique, not_null]
