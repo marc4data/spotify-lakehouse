@@ -274,10 +274,24 @@ class PlaylistMatch:
         )
 
 
+# Spotify stores what the user typed, and phone keyboards type a typographic apostrophe. Marc's
+# playlist is `Connor\u2019s Playlist`; searching for `Connor's Playlist` with an ASCII apostrophe
+# matches nothing at all (R-054, Marc 2026-09-16: "compare on a form that tolerates both").
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "`": "'"})
+
+
+def normalise_name(value: object) -> str:
+    """Casefolded, trimmed, and with every apostrophe variant folded to ASCII."""
+    if not isinstance(value, str):
+        return ""
+    return value.translate(_APOSTROPHES).strip().lower()
+
+
 def candidates(frame: pd.DataFrame, needle: str, *, column: str = "playlist_name") -> list[str]:
-    """Every playlist name containing `needle`, case-insensitively."""
-    matches = frame[frame[column].str.contains(needle, case=False, na=False, regex=False)]
-    return sorted(matches[column].unique())
+    """Every playlist name containing `needle`, ignoring case and apostrophe style."""
+    target = normalise_name(needle)
+    normalised = frame[column].map(normalise_name)
+    return sorted(frame.loc[normalised.str.contains(target, regex=False), column].unique())
 
 
 def resolve(frame: pd.DataFrame, needle: str, *, column: str = "playlist_name") -> PlaylistMatch:
@@ -287,8 +301,8 @@ def resolve(frame: pd.DataFrame, needle: str, *, column: str = "playlist_name") 
     returned with `exact=False` and a warning the caller must display; zero or several raise.
     """
     found = candidates(frame, needle, column=column)
-    lowered = needle.strip().lower()
-    exact = [name for name in found if name.strip().lower() == lowered]
+    target = normalise_name(needle)
+    exact = [name for name in found if normalise_name(name) == target]
     if len(exact) == 1:
         return PlaylistMatch(needle, exact[0], True, found)
     if len(exact) > 1:

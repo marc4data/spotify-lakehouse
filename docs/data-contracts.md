@@ -73,6 +73,15 @@ nothing here proposes to:** silently dropping 1,558 real plays is a modelling de
 for, and a worse surprise than the fact itself.
 
 > [!WARNING]
+> **The rows reach `fct_play_event`; the flag does not** (R-007 F1, clarified by spot-main-R-054).
+> `was_incognito` exists only on `stg_export__play_record` — it is on **1** model file and **0** of
+> the marts, verified 2026-09-16. So a filter cannot be written against the fact table: excluding
+> incognito plays means joining back to export staging on the natural key
+> `(content_uri, ended_at_utc)`, which is what `publish.py` does. R-007 measured that join removing
+> exactly **1,558** rows, and checked it a second way first — **0** incognito rows share a key with
+> a non-incognito row, so the join cannot be removing somebody else's play.
+
+> [!WARNING]
 > **Consequence for `04_household_comparison.ipynb`** (R-044, parked): when Marie's, Brody's and
 > Emma's exports land, **their private sessions will be visible in a notebook built to compare family
 > members**. That is a fact about the data, not a defect to fix in the loader, and it is not R-052's

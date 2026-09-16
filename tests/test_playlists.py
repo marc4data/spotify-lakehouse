@@ -148,3 +148,19 @@ def test_an_exact_name_wins_over_a_longer_substring_match() -> None:
     match = playlists.resolve(frame, "connor")
     assert match.exact and match.name == "Connor"
     assert len(match.candidates) == 2, "both are candidates; the exact one wins"
+
+
+def test_a_typographic_apostrophe_matches_an_ascii_one() -> None:
+    """R-054, Marc 2026-09-16. His playlist is `Connor\u2019s Playlist`, typed on a phone.
+
+    Searching for `Connor's Playlist` with an ASCII apostrophe matched zero playlists, and zero
+    matches is indistinguishable from "no such playlist" — the wrong answer to give when it exists.
+    """
+    frame = pd.DataFrame({"playlist_name": ["Connor\u2019s Playlist", "Smith", "Jazz"]})
+    match = playlists.resolve(frame, "Connor's Playlist")
+    assert match.exact, "an apostrophe variant is still an exact name match"
+    assert match.name == "Connor\u2019s Playlist"
+    # and the reverse direction: the stored ASCII form found by a typographic query
+    ascii_frame = pd.DataFrame({"playlist_name": ["Connor's Playlist"]})
+    assert playlists.resolve(ascii_frame, "Connor\u2019s Playlist").exact
+    assert playlists.normalise_name("Connor\u2019S  ") == "connor's"
