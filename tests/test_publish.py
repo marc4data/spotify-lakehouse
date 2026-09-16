@@ -44,12 +44,16 @@ def test_every_option_actually_changes_the_output(db) -> None:
     the PII battery could not tell "excluded" from "never built" (R-052 F3). This is what tells it.
     """
     base = publish.plays_daily(db, _options())
-    no_country = publish.plays_daily(db, _options(include_conn_country=False))
+    with_country = publish.plays_daily(db, _options(include_conn_country=True))
     with_family = publish.plays_daily(db, _options(include_platform_family=True))
     kept = publish.plays_daily(db, _options(exclude_incognito=False))
 
-    assert "conn_country" in base.columns, "Cowork's default keeps conn_country"
-    assert "conn_country" not in no_country.columns
+    # R-057 inverted this default. THIS is the assertion covering the new default: it fails if
+    # conn_country creeps back into the default build, and the one below fails if the flag goes
+    # inert — the two failure modes R-007 F4 could not tell apart.
+    assert "conn_country" not in base.columns, "R-057: the default build carries no conn_country"
+    assert "conn_country" in with_country.columns, "--conn-country must still put it back"
+    assert len(with_country) != len(base), "conn_country extends the grain, so the row count moves"
     assert "platform_family" in with_family.columns
     assert "platform_family" not in base.columns
     assert "platform" not in with_family.columns, "the family, never the device string"
@@ -194,3 +198,41 @@ def test_manifest_lists_every_column_and_every_exclusion(db, tmp_path) -> None:
     assert (table["included"] == "NO").sum() == len(publish.EXCLUDED_FIELDS)
     excluded = table[table["included"] == "NO"]
     assert excluded["note"].str.len().gt(20).all(), "every exclusion states a reason"
+
+
+def test_coverage_published_columns_are_measured_not_derived(db) -> None:
+    """R-057, answering R-007 F2. The published figures must come from the extract's own query path.
+
+    If they were computed by subtracting the exclusions from the warehouse totals they would be a
+    restatement of those totals, and any error in the extracts would cancel out instead of showing.
+    """
+    frame = publish.coverage(db, _options())
+    if frame.empty:
+        pytest.skip("no reconciliation rows for marc")
+    for column in ("published_play_count", "published_ms_played", "published_rows_with_duration"):
+        assert column in frame.columns, column
+
+    # step 1's published count must equal what plays_daily actually publishes, independently built
+    daily = publish.plays_daily(db, _options())
+    step_one = frame.loc[frame["step_number"] == 1].iloc[0]
+    assert int(step_one["published_play_count"]) == int(round(daily["allocated_plays"].sum()))
+
+    # and it must be strictly smaller than the warehouse total, because incognito plays are excluded
+    assert int(step_one["published_play_count"]) < int(step_one["play_count"])
+
+    # the warehouse columns are untouched: the identity test above still owns them
+    assert step_one["step_name"] == "total_listening"
+
+
+def test_conn_country_is_absent_from_every_written_file(db, tmp_path) -> None:
+    """The default build writes no country column — checked on the files, not the frames."""
+    results = publish.write_extracts(db, _options(), out_dir=tmp_path)
+    for result in results:
+        header = result.path.read_text(encoding="utf-8").splitlines()[0]
+        assert "conn_country" not in header, f"{result.path.name}: {header}"
+    # positive control: with the flag on it IS written, so the absence above is real
+    with_country = publish.write_extracts(
+        db, _options(include_conn_country=True), out_dir=tmp_path / "on"
+    )
+    headers = [r.path.read_text(encoding="utf-8").splitlines()[0] for r in with_country]
+    assert any("conn_country" in header for header in headers), headers

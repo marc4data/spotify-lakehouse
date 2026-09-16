@@ -495,7 +495,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
         profile=args.profile,
         exclude_incognito=not args.include_incognito,
         include_platform_family=args.platform_family,
-        include_conn_country=not args.no_conn_country,
+        include_conn_country=args.conn_country,
     )
     settings = load_settings()
     with connect(settings) as conn:
@@ -697,7 +697,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="add a device family column (never the raw platform string)",
     )
     p_publish.add_argument(
-        "--no-conn-country", action="store_true", help="drop conn_country (default: kept)"
+        "--conn-country",
+        action="store_true",
+        help="add conn_country for a local-only build (default: absent, R-057)",
     )
     p_publish.set_defaults(func=cmd_publish)
 

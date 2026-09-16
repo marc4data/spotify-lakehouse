@@ -46,7 +46,9 @@ class Options:
     profile: str = "marc"
     exclude_incognito: bool = True
     include_platform_family: bool = False
-    include_conn_country: bool = True
+    # R-057, Marc 2026-09-16: "turn country off. Can't really explain that blip in MEX."
+    # Inverted from R-007's default: absent unless a flag asks for it.
+    include_conn_country: bool = False
 
 
 @dataclass(frozen=True)
@@ -124,7 +126,7 @@ def plays_daily(conn: Any, opts: Options) -> pd.DataFrame:
     chain allocates. The query collapses to one row per (play, bucket) first, so neither measure is
     multiplied by the genre join (R-007 F3).
 
-    `conn_country` is on by default and `platform_family` is off, per Cowork's R-007 defaults. Each
+    `conn_country` and `platform_family` are both off by default (R-057 inverted the first). Each
     adds a dimension to the grain when on, so the row count changes with it (R-007 F4).
     """
     optional = []
@@ -275,20 +277,68 @@ def genres(conn: Any, opts: Options) -> pd.DataFrame:
     return grouped.reset_index(drop=True)
 
 
-def coverage(conn: Any, opts: Options) -> pd.DataFrame:
-    """The four reconciliation steps and their residuals, verbatim from the model.
+def published_steps(conn: Any, opts: Options) -> pd.DataFrame:
+    """The same four steps over the universe the extracts publish (R-057, answering R-007 F2).
 
-    ⚠️ This describes the **warehouse**, not the published extract: the reconciliation counts every
-    play, including the incognito ones the extracts exclude. R-007 F2 — a workbook quoting these
-    numbers beside filtered extracts would overstate its own coverage by the excluded rows.
+    🚨 Measured, not derived. These figures come from the same joins and the same exclusion
+    `plays_daily` applies — not by subtracting something off the warehouse totals, which would
+    make the column a restatement of a number rather than a measurement of the file.
     """
     return _frame(
+        conn,
+        "with plays as ("
+        "select fct.play_event_key, fct.ms_played, content.content_type, bridge.artist_key "
+        "from {mart}.fct_play_event as fct "
+        "join {mart}.dim_profile as profiles on profiles.profile_key = fct.profile_key "
+        "join {mart}.dim_content as content on content.content_key = fct.content_key "
+        "left join {mart}.br_content_artist as bridge "
+        "on bridge.content_key = fct.content_key and bridge.is_primary "
+        "where profiles.profile_slug = %s" + _incognito_filter(opts) + "), "
+        "allocated as ("
+        "select distinct plays.play_event_key from plays "
+        "join {mart}.br_artist_genre as bridge on bridge.artist_key = plays.artist_key "
+        "and bridge.tag_type = %s "
+        "join {stg}.int_genre_bucket_map as map on map.genre_key = bridge.genre_key) "
+        "select 1 as step_number, count(*) as published_play_count, "
+        "sum(ms_played) as published_ms_played, "
+        "count(ms_played) as published_rows_with_duration from plays "
+        "union all select 2, count(*), sum(ms_played), count(ms_played) "
+        "from plays where content_type = 'track' "
+        "union all select 3, count(*), sum(ms_played), count(ms_played) "
+        "from plays where content_type = 'track' and artist_key is not null "
+        "union all select 4, count(*), sum(ms_played), count(ms_played) from plays "
+        "where content_type = 'track' "
+        "and play_event_key in (select play_event_key from allocated) "
+        "order by 1",
+        (opts.profile, *_incognito_params(opts), allocation_tag_type()),
+    )
+
+
+def coverage(conn: Any, opts: Options) -> pd.DataFrame:
+    """The four reconciliation steps: the warehouse's numbers, and the published file's beside them.
+
+    The `play_count` / `ms_played` columns stay **verbatim from
+    `int_allocation_reconciliation`** and still match it exactly. The `published_*` columns
+    describe what this extract actually contains, because the extracts exclude incognito plays
+    and the reconciliation does not (R-007 F2). Both exist because a caption in a workbook is one
+    edit from being deleted; a column travels with the file.
+
+    🚨 **The two families are not subtractable.** The warehouse columns read the
+    `int_play_events__deduped` view; these read the `fct_play_event` table. R-057 measured 11 api
+    plays present in the view and absent from the table — they arrived from the poller after the
+    table was materialised. Subtracting the two would report that skew as if it were an exclusion.
+    The exclusion actually applied is `fct_play_event` minus the published rows.
+    """
+    warehouse = _frame(
         conn,
         "select profile_slug, step_number, step_name, play_count, ms_played, rows_with_duration, "
         "pct_rows_with_duration, residual_name, residual_play_count, residual_ms_played "
         "from {stg}.int_allocation_reconciliation where profile_slug = %s order by step_number",
         (opts.profile,),
     )
+    if warehouse.empty:
+        return warehouse
+    return warehouse.merge(published_steps(conn, opts), on="step_number", how="left")
 
 
 EXTRACTS = {
@@ -311,6 +361,13 @@ EXCLUDED_FIELDS = [
         "stg_export__play_record.was_incognito",
         "1,558 plays Marc marked private. Excluded by default; "
         "`exclude_incognito=False` keeps them.",
+    ),
+    (
+        "conn_country",
+        "fct_play_event.conn_country",
+        'Marc\'s decision 2026-09-16: "turn country off". A coarse location trace over twelve '
+        "years. `--conn-country` restores it for a local-only build; it also puts the column back "
+        "into plays_daily's grain, so the row count changes with it.",
     ),
     (
         "artist_id / content_uri",
@@ -399,6 +456,16 @@ _SOURCES = {
     "allocated_ms": "ms_played × weight_factor",
     "share_of_music_ms": "allocated_ms / month total",
     "conn_country": "fct_play_event.conn_country (US / ZZ / MX; ZZ is not a country)",
+    "published_play_count": (
+        "The same step measured over the rows this extract publishes. ⚠️ Do NOT subtract this from "
+        "`play_count`: the warehouse columns come from `int_allocation_reconciliation`, which "
+        "reads the `int_play_events__deduped` VIEW, while these read the `fct_play_event` TABLE. "
+        "A poll "
+        "landing between materialisation and query puts rows in one and not the other (R-057 "
+        "measured 11 such rows). The exclusion actually applied is measured against the fact table."
+    ),
+    "published_ms_played": "the same step measured over the rows this extract publishes",
+    "published_rows_with_duration": "non-null ms_played among the rows published",
     "platform_family": "listening.platform_family(fct_play_event.platform) — never the string",
     "step_number": "int_allocation_reconciliation",
     "step_name": "int_allocation_reconciliation",
@@ -413,7 +480,11 @@ _NOTES = {
     "bucket_name": f"`{UNCLASSIFIED}` where the primary artist has no genre — a row, not a gap.",
     "artist_name": f"`{UNIDENTIFIED}` where no artist object has been resolved.",
     "ms_played": "NULL on API plays; never defaulted to zero (data-contracts §2).",
-    "play_count": "Counts every play in the warehouse, incognito included — see the coverage note.",
+    "play_count": (
+        "Every play in the warehouse, incognito included. `published_play_count` is the same "
+        "step over what this file actually contains; both exist so a workbook cannot quote "
+        "warehouse coverage beside filtered extracts (R-007 F2, R-057)."
+    ),
 }
 
 
