@@ -18,7 +18,7 @@ from typing import Any
 import pandas as pd
 
 from spotify_lakehouse.inventory import SAMPLE_ROWS, _callout, _md, _show, _summary, sample_frame
-from spotify_lakehouse.redact import REDACTED, _is_sensitive, redact_profile
+from spotify_lakehouse.redact import REDACTED, _is_sensitive, hides_values, redact_profile
 
 IDENTIFIER_SUFFIXES = ("_id", "_uri", "_mbid")
 IDENTIFIER_COLUMNS = frozenset({"request_key"})
@@ -33,11 +33,20 @@ def is_identifier(column: Any) -> bool:
     return _is_sensitive(name) or name.endswith(IDENTIFIER_SUFFIXES) or name in IDENTIFIER_COLUMNS
 
 
+def must_redact(column: Any) -> bool:
+    """Identifier-shaped, or a column whose values must never render (`redact.hides_values`).
+
+    The second half is what a generic helper needs: `column_schema` and `payload_key_schema` profile
+    whatever table they are pointed at, so they cannot rely on a rule written per display (R-052).
+    """
+    return is_identifier(column) or hides_values(column)
+
+
 def redact_sample(frame: pd.DataFrame) -> pd.DataFrame:
-    """`redact_profile`, then mask every identifier-shaped column the profile rule does not name."""
+    """`redact_profile`, then mask identifier-shaped and value-sensitive columns."""
     out = redact_profile(frame)
     for column in out.columns:
-        if is_identifier(column):
+        if must_redact(column):
             out[column] = out[column].where(out[column].isna(), REDACTED)
     return out
 
@@ -105,7 +114,7 @@ def _schema_row(name: str, kind: str, non_null: int, total: int, example: Any) -
         "type": kind,
         "non_null": f"{non_null}/{total}",
         "null_rate": round(1 - non_null / total, 4) if total else None,
-        "example": REDACTED if example is not None and is_identifier(name) else _summary(example),
+        "example": REDACTED if example is not None and must_redact(name) else _summary(example),
     }
 
 

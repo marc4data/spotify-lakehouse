@@ -22,6 +22,23 @@ SENSITIVE_FIELDS = frozenset(
 )
 
 
+# Columns whose *values* must never render, as distinct from SENSITIVE_FIELDS above, which names
+# columns identifying a person. A generic helper — one that iterates columns and samples, ranges or
+# counts each the same way — never meets a rule written for a display somebody chose, so it consults
+# this list instead (R-052, from R-050 F1 and R-049 F4).
+# Extend THIS list when a new sensitive column appears; the call sites do not change.
+SENSITIVE_VALUE_COLUMNS = frozenset(
+    {
+        "platform",  # names a device model, e.g. a full Windows build string (R-009, R-050 F1)
+    }
+)
+
+
+def hides_values(column: Any) -> bool:
+    """Whether a column's values must never be rendered — not as an example, a range or a mode."""
+    return any(part in SENSITIVE_VALUE_COLUMNS for part in str(column).split("."))
+
+
 def _is_sensitive(column: str) -> bool:
     # Handles json_normalize-style dotted names such as `external_urls.spotify` or `owner.id`.
     return any(part in SENSITIVE_FIELDS for part in str(column).split("."))

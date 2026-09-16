@@ -41,6 +41,22 @@ standalone without the package is a notebook that has credentials in it.**
 **PII:** every display of profile, user, or follower data passes through
 `spotify_lakehouse.redact.redact_profile()`. The `/me` endpoint returns an email address.
 
+🚨 **A helper that iterates columns generically carries its own sensitive-column list.** The rule
+above governs displays that were **written** — a chosen table, a chosen set of columns. A generic
+profiler, schema lister or sampler never meets it: it profiles column 17 exactly as it profiled
+column 3, and if column 17 is `platform` it renders a device model. Any such helper names the columns
+whose *values* must never render — today `platform`, because it names a device — and redacts them in
+**every** derived field: example, min, max, modal value and sample rows alike.
+
+**The list is `spotify_lakehouse.redact.SENSITIVE_VALUE_COLUMNS`**, and it binds two helpers today:
+`history.field_profile`, and `data_inventory.column_schema` / `payload_key_schema` / `redact_sample`
+(the two schema helpers share `_schema_row`, so one list reaches both). 🚨 **When a new sensitive
+column appears, extend the list — not the call sites**, which is the whole point of having it.
+
+Added by R-052, from R-050 F1: a 34-character Windows build string across 24,816 records reached a
+rendered report, and R-009's method C caught it at 1 of 76 — understating it, because `example` and
+`min` were raw as well and `max` was a raw value truncated at 24 characters.
+
 ---
 
 ## 1. `01_data_inventory.ipynb` — every source this project can reach

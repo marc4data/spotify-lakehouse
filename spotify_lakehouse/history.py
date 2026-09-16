@@ -25,6 +25,7 @@ import pandas as pd
 from spotify_lakehouse.data_inventory import REDACTED, column_schema, redact_sample
 from spotify_lakehouse.inventory import _callout, _md, _show
 from spotify_lakehouse.listening import MS_PER_HOUR, period_start, platform_family
+from spotify_lakehouse.redact import SENSITIVE_VALUE_COLUMNS
 
 NO_DATA = "No data for this panel"
 TOP_ROWS = 10
@@ -34,7 +35,7 @@ MILLISECOND_THRESHOLD = 100_000_000_000
 LONG_PLAY_HOURS = 2
 # `platform` can name a device model (R-009), so no raw value is displayed anywhere — not as an
 # example, not as a range, not as a modal value. §2 profiles it by family; §6.1 charts families.
-SENSITIVE_COLUMNS = {"platform"}
+# The list itself lives in `redact` (R-052): one definition, read by every generic profiler.
 
 EXPORT_COLUMNS = [
     "ended_at_utc",
@@ -184,7 +185,7 @@ def field_profile(ctx: Any) -> pd.DataFrame:
             f"from {{stg}}.{table} where profile_slug = %s",
             (ctx.profile,),
         )[0]
-        if name in SENSITIVE_COLUMNS:
+        if name in SENSITIVE_VALUE_COLUMNS:
             rows.append(
                 {
                     "field": name,
@@ -212,7 +213,7 @@ def field_profile(ctx: Any) -> pd.DataFrame:
         )
     merged = schema.merge(pd.DataFrame(rows), on="field", how="left")
     # column_schema samples a real value for `example`; redact it for the same reason.
-    merged.loc[merged["field"].isin(SENSITIVE_COLUMNS), "example"] = REDACTED
+    merged.loc[merged["field"].isin(SENSITIVE_VALUE_COLUMNS), "example"] = REDACTED
     return merged
 
 

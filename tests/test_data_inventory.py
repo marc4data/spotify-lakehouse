@@ -45,5 +45,27 @@ def test_schema_examples_of_identifier_fields_are_masked() -> None:
     row = data_inventory._schema_row("spotify_track_uri", "string", 5, 10, "spotify:track:x")
     assert row["example"] == REDACTED
     assert row["null_rate"] == 0.5
-    kept = data_inventory._schema_row("platform", "string", 10, 10, "ios")
-    assert kept["example"] == "ios"
+    kept = data_inventory._schema_row("track_name", "string", 10, 10, "Song")
+    assert kept["example"] == "Song"
+
+
+def test_schema_examples_of_value_sensitive_columns_are_masked() -> None:
+    """R-052: `platform` names a device, so a generic profiler must never sample its value.
+
+    This is the second site of R-050 F1. `_schema_row` is shared by `column_schema` and
+    `payload_key_schema`, so this one assertion covers every table either is pointed at.
+    """
+    row = data_inventory._schema_row("platform", "string", 10, 10, "Windows 8 (6.2.9200; x64)")
+    assert row["example"] == REDACTED
+    # and by payload key name, as `payload_key_schema` supplies it
+    assert data_inventory._schema_row("platform", "string", 5, 5, "osx")["example"] == REDACTED
+
+
+def test_samples_mask_value_sensitive_columns() -> None:
+    frame = pd.DataFrame(
+        {"platform": ["Windows 8 (6.2.9200; x64)", None], "track_name": ["A", "B"]}
+    )
+    out = data_inventory.redact_sample(frame)
+    assert set(out["platform"].dropna()) == {REDACTED}
+    assert out["platform"].isna().tolist() == [False, True]  # nulls stay null
+    assert out["track_name"].tolist() == ["A", "B"]

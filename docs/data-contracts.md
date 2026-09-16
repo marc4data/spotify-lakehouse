@@ -65,6 +65,19 @@ with a check constraint on `raw.export_record` as the backstop (R-003; this sent
 staging", which §1 made impossible). **Dropped at staging:** **`account_id`** from `/me`, an identifier Spotify
 returns but does not document (F8). Nothing in the model needs it.
 
+**Incognito plays are in the export, and they stay in the model.** A "private session" is not
+withheld from the GDPR export: **1,558 of `marc`'s records carry `incognito_mode = true`** (measured
+R-052, 2026-09-16 — the same count in `raw.export_record` and `stg_export__play_record`). They reach
+`fct_play_event` and sit inside every figure in all three notebooks. **Nothing filters them and
+nothing here proposes to:** silently dropping 1,558 real plays is a modelling decision nobody asked
+for, and a worse surprise than the fact itself.
+
+> [!WARNING]
+> **Consequence for `04_household_comparison.ipynb`** (R-044, parked): when Marie's, Brody's and
+> Emma's exports land, **their private sessions will be visible in a notebook built to compare family
+> members**. That is a fact about the data, not a defect to fix in the loader, and it is not R-052's
+> to solve. R-044's §1 says it out loud before any comparison is drawn.
+
 ### Deduplication contract
 
 The export and the API overlap. Once a refreshed export arrives, every play it covers is already in

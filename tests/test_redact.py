@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pandas as pd
 
-from spotify_lakehouse.redact import REDACTED, redact_mapping, redact_profile
+from spotify_lakehouse.redact import (
+    REDACTED,
+    SENSITIVE_VALUE_COLUMNS,
+    hides_values,
+    redact_mapping,
+    redact_profile,
+)
 from spotify_lakehouse.shape import describe_shape
 
 
@@ -41,3 +47,12 @@ def test_describe_shape_reports_paths_and_types_never_values() -> None:
     assert shape["$.items[].played_at"] == "str"
     assert shape["$.items[].n"] == "null"
     assert "2026-01-01" not in repr(shape)
+
+
+def test_hides_values_names_columns_whose_values_must_never_render() -> None:
+    """R-052: the one list every generic profiler reads, and the extension point for new columns."""
+    assert "platform" in SENSITIVE_VALUE_COLUMNS
+    assert hides_values("platform")
+    assert hides_values("payload.platform")  # dotted, as json_normalize produces
+    assert not hides_values("track_name")
+    assert not hides_values("conn_country")
