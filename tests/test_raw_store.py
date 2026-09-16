@@ -156,3 +156,42 @@ def test_scrub_reports_nothing_when_there_was_nothing_to_discard() -> None:
     clean, removed = raw_store.scrub("/playlists/3cEYpjA9oz9GiPac4AsH4n/items", payload)
     assert clean == payload
     assert removed == []
+
+
+# --- ownership is a boolean, computed before the id is discarded (spot-main-R-058) --------------
+
+
+def test_ownership_is_flagged_before_owner_id_is_discarded() -> None:
+    """R-058. The bit survives; the identifier does not."""
+    payload = {
+        "items": [
+            {"id": "mine", "name": "Smith", "owner": {"id": "marc-real-id", "type": "user"}},
+            {"id": "theirs", "name": "Someone else's", "owner": {"id": "other", "type": "user"}},
+        ]
+    }
+    clean, removed = raw_store.scrub("/me/playlists", payload, owner_id="marc-real-id")
+    assert clean["items"][0][raw_store.OWNERSHIP_FLAG] is True
+    assert clean["items"][1][raw_store.OWNERSHIP_FLAG] is False
+    # the identifier it was computed from is gone from BOTH rows
+    for item in clean["items"]:
+        assert "id" not in item["owner"], item["owner"]
+    assert "items[].owner.id" in removed
+    # and nothing anywhere in the scrubbed payload still contains either id
+    assert "marc-real-id" not in repr(clean)
+    assert "other" not in repr(clean)
+    assert payload["items"][0]["owner"]["id"] == "marc-real-id"  # input untouched
+
+
+def test_ownership_flag_is_absent_when_no_owner_id_is_supplied() -> None:
+    """Every other caller passes nothing and must be unaffected."""
+    payload = {"items": [{"id": "x", "owner": {"id": "someone", "type": "user"}}]}
+    clean, _ = raw_store.scrub("/me/playlists", payload)
+    assert raw_store.OWNERSHIP_FLAG not in clean["items"][0]
+
+
+def test_an_unknown_owner_is_not_owned() -> None:
+    """A missing or null owner.id must read as False, never as a match."""
+    payload = {"items": [{"id": "x", "owner": {"type": "user"}}, {"id": "y"}]}
+    clean, _ = raw_store.scrub("/me/playlists", payload, owner_id="marc-real-id")
+    assert clean["items"][0][raw_store.OWNERSHIP_FLAG] is False
+    assert clean["items"][1][raw_store.OWNERSHIP_FLAG] is False

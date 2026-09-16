@@ -3,8 +3,11 @@
 --
 -- 🚨 No owner column, by design. `raw_store` discards `items[].owner.*` before anything is written
 -- (R-054): a playlist names a person who is not Marc, and discarding beats redacting because a field
--- never written cannot leak from a table nobody thought to check. data-contracts §3 contracts
--- `dim_playlist` as Type 2 *on owner*, which cannot be built from this — reported as a finding.
+-- never written cannot leak from a table nobody thought to check.
+--
+-- `is_owned_by_profile` is the answer to "is this Marc's?" without an identifier: `scrub` compares
+-- `owner.id` to the profile's own Spotify id **before** discarding it and keeps one boolean (R-058).
+-- §3's Type 2 "on owner" is amended to name that boolean.
 with source as (
     select
         id as raw_response_id,
@@ -41,6 +44,7 @@ select
     playlist ->> 'uri' as playlist_uri,
     playlist ->> 'name' as playlist_name,
     nullif(playlist ->> 'description', '') as description,
+    (playlist ->> 'is_owned_by_profile')::boolean as is_owned_by_profile,
     (playlist ->> 'collaborative')::boolean as is_collaborative,
     (playlist ->> 'public')::boolean as is_public,
     playlist ->> 'snapshot_id' as snapshot_id,

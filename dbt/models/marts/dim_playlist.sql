@@ -1,10 +1,10 @@
 -- dim_playlist, SCD Type 2 (data-contracts §3): a new version whenever a tracked attribute changes.
 --
--- 🚨 No owner column. §3 contracts Type 2 on "name, description, owner, is_public, is_collaborative,
--- track_count", but R-054 discards owner identity at ingest — a playlist's owner is a person who is
--- not Marc, and the repo is public. Owner is therefore not derivable from `raw` and this model
--- cannot carry it. Reported as a finding rather than amended, since R-054 sanctions only two
--- contract edits and this is not one of them.
+-- 🚨 No owner column, and none is coming: owner identity is discarded at ingest because a playlist's
+-- owner is a person who is not Marc and the repo is public. What this model carries instead is
+-- `is_owned_by_profile`, a boolean `scrub` computes from `owner.id` before discarding it (R-058).
+-- §3's "Type 2 on owner" is amended to name the boolean — this round's one sanctioned amendment.
+-- It is a tracked attribute: a playlist changing hands starts a new version.
 with observations as (
     select distinct on (playlist_id, ingested_at)
         playlist_id,
@@ -13,6 +13,7 @@ with observations as (
         playlist_uri,
         playlist_name,
         description,
+        is_owned_by_profile,
         is_collaborative,
         is_public,
         snapshot_id,
@@ -26,6 +27,7 @@ hashed as (
         *,
         md5(
             coalesce(playlist_name, '') || '|' || coalesce(description, '') || '|'
+            || coalesce(is_owned_by_profile::text, '') || '|'
             || coalesce(is_collaborative::text, '') || '|' || coalesce(is_public::text, '') || '|'
             || coalesce(track_total::text, '')
         ) as attribute_hash
@@ -59,6 +61,7 @@ resolved as (
         playlist_uri,
         playlist_name,
         description,
+        is_owned_by_profile,
         is_collaborative,
         is_public,
         snapshot_id,
@@ -76,6 +79,7 @@ unknown_member as (
         null::text as playlist_uri,
         'Unknown playlist'::text as playlist_name,
         null::text as description,
+        null::boolean as is_owned_by_profile,
         null::boolean as is_collaborative,
         null::boolean as is_public,
         null::text as snapshot_id,

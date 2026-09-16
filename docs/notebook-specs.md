@@ -33,6 +33,7 @@ standalone without the package is a notebook that has credentials in it.**
 |---|---|
 | Code cells are **hidden** in the report. | Every code cell must be preceded by a markdown cell that says what it shows. A section with no markdown renders as an unexplained table. |
 | `print()` is **excluded** by default. | Use `display()` for anything the reader must see. Do not rely on `--include-stdout`. |
+| 🚨 **`display()` alone is not enough: nb2report drops `text/plain`.** | A plain string, dict or Series passed to `display()` **vanishes from the rendered report** while looking correct in the notebook. R-054 F4 lost every directional label that way, and the module and its tests were right the whole time — only the artifact was wrong. Wrap anything not already rich in `Markdown`, and **verify by reading the rendered HTML, not the notebook**. |
 | Headings drive the TOC and the collapsible tree. | Heading discipline is the document structure. See below. |
 | `display(Markdown('### Foo'))` from a code cell opens a section. | This is how the EDA notebook generates one section per endpoint from a loop instead of 30 hand-written cells. |
 | `> [!WARNING]` / `> [!CAUTION]` blockquotes become callouts and drive the "Issues Only" filter. | Every data-quality finding gets one. That filter is the fastest review path. |

@@ -12,3 +12,7 @@ models:
         tests: [not_null]
       - name: playlist_name
         tests: [not_null]
+      - name: is_owned_by_profile
+        description: >
+          Whether the profile owns this playlist. Computed in scrub from owner.id before that id is
+          discarded (R-058); no identifier is stored anywhere.

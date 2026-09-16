@@ -12,3 +12,5 @@ models:
         tests: [not_null]
       - name: snapshot_date
         tests: [not_null]
+      - name: is_owned_by_profile
+        description: Boolean from scrub, computed before owner.id was discarded (R-058).

@@ -232,7 +232,19 @@ time, and surviving that is the reason for versioning.
 Straightforward. `dim_show` carries publisher, total_episodes, media_type.
 
 ### `dim_playlist` — SCD Type 2
-Name, description, owner, is_public, is_collaborative, track_count all change. Type 2 on all of them.
+Name, description, **`is_owned_by_profile`**, is_public, is_collaborative, track_count all change.
+Type 2 on all of them.
+
+> [!WARNING]
+> **`owner` is not a column and never will be, amended by spot-main-R-058.** This row previously
+> contracted Type 2 *on owner*. A playlist's owner is a person who is not necessarily Marc, this
+> repository is public, and `raw_store.scrub` discards `items[].owner.*` before anything is written
+> (R-054) — so owner identity is not derivable from `raw` and the model cannot carry it.
+>
+> What replaces it answers the same question without the identifier: **`scrub` compares `owner.id`
+> to the profile's own Spotify id on the way past and keeps a boolean**, `is_owned_by_profile`. The
+> id is gone by the time the payload is written; only the bit survives. It is a tracked Type 2
+> attribute, so a playlist changing hands starts a new version.
 
 ### `dim_date`, `dim_time_of_day`
 `dim_date`: standard, generated 2008-10-07 (Spotify launch) through +2 years, with fiscal-free

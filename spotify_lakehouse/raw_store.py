@@ -95,18 +95,48 @@ def _discard(node: Any, parts: tuple[str, ...], removed: set[str], prefix: str) 
     _discard(node.get(head), rest, removed, f"{prefix}{head}.")
 
 
-def scrub(endpoint: str, payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+OWNERSHIP_FLAG = "is_owned_by_profile"
+
+
+def _flag_ownership(payload: dict[str, Any], owner_id: str) -> int:
+    """Set a BOOLEAN on each playlist from `owner.id`, before the id is discarded (R-058).
+
+    🚨 The comparison has to happen here and nowhere else. `dim_playlist` cannot answer "is this
+    Marc's?" because owner identity never reaches `raw` (R-054 F6) — and that stays true. What
+    changes is that `scrub` sees `owner.id` on its way past, compares it, and keeps one bit. No
+    identifier is written: the id is gone by the time this function returns.
+    """
+    flagged = 0
+    for item in payload.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        owner = item.get("owner")
+        observed = owner.get("id") if isinstance(owner, dict) else None
+        item[OWNERSHIP_FLAG] = bool(observed) and str(observed) == str(owner_id)
+        flagged += 1
+    return flagged
+
+
+def scrub(
+    endpoint: str, payload: dict[str, Any], *, owner_id: str | None = None
+) -> tuple[dict[str, Any], list[str]]:
     """Return a copy of `payload` without discarded fields, plus the paths that were removed.
 
     Nested paths are supported because playlist PII is nested (R-054): the owner sits under
     `items[].owner` and `added_by` under every item. An endpoint with no feed discards nothing
     rather than raising, which is what the callers relied on before feeds were involved.
+
+    `owner_id` is optional and only the playlist feed uses it: given the profile's own Spotify id,
+    each playlist gains a boolean `is_owned_by_profile` **computed before the discards run**. Every
+    other caller is unaffected and passes nothing.
     """
     clean = copy.deepcopy(payload)
     try:
         feed = feed_for_endpoint(endpoint)
     except ValueError:
         return clean, []
+    if feed == "playlist" and owner_id:
+        _flag_ownership(clean, owner_id)
     removed: set[str] = set()
     for path in DISCARDED_PATHS_BY_FEED.get(feed, ()):
         _discard(clean, tuple(path.split(".")), removed, "")

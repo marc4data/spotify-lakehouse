@@ -544,8 +544,13 @@ def cmd_extract_playlists(args: argparse.Namespace) -> int:
         print(f"  refused: {note}")
     for note in result.partial:
         print(f"  partial: {note}")
+    if result.throttled:
+        print(
+            f"  playlists skipped by RATE LIMITING, not refusal: {len(result.throttled)} "
+            f"(429 on both routes; re-run when the window clears)"
+        )
     if result.skipped:
-        print(f"  playlists neither route would serve: {len(result.skipped)}")
+        print(f"  playlists neither route would serve: {len(result.skipped)} (403, not throttling)")
     for note in result.unsafe_next:
         print(f"  next-link refused: {note}", file=sys.stderr)
     return 0

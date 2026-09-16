@@ -76,11 +76,15 @@ class LoadResult:
     routes: dict[str, str] = field(default_factory=dict)
     fallbacks: list[str] = field(default_factory=list)
     refusals: list[str] = field(default_factory=list)
+    throttled: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     partial: list[str] = field(default_factory=list)
     unsafe_next: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
     calls: int = 0
+    # False means the profile has no stored Spotify id, so ownership could not be computed at
+    # all — reported rather than silently written as all-False (R-058).
+    ownership_resolved: bool = False
 
     @property
     def route_counts(self) -> dict[str, int]:
@@ -95,6 +99,25 @@ def page_key(playlist_id: str | None, page: int) -> str:
     return f"{playlist_id}p{page}" if playlist_id else f"p{page}"
 
 
+def profile_spotify_id(conn: psycopg.Connection, profile: str) -> str | None:
+    """The profile's own Spotify user id, read to COMPARE against — never written (R-058).
+
+    `scrub` needs it to set `is_owned_by_profile` before it discards `owner.id`. It is held in
+    memory for the length of one load and reaches no file and no table.
+
+    Read from `raw.api_response`'s `/me` feed, not from `dim_profile`: an ingest path must not
+    depend on a dbt build having run. `spot_meta.profile_registry` does not carry it at all — it
+    holds `profile_slug`, `household_role`, `home_timezone`, `loaded_at` and nothing else.
+    """
+    row = conn.execute(
+        "select payload ->> 'id' from raw.api_response "
+        "where feed = 'me' and profile_slug = %s and payload ? 'id' "
+        "order by ingested_at desc limit 1",
+        (profile,),
+    ).fetchone()
+    return str(row[0]) if row and row[0] else None
+
+
 def _store(
     conn: psycopg.Connection,
     profile: str,
@@ -102,9 +125,10 @@ def _store(
     endpoint: str,
     payload: dict[str, Any],
     key: str,
+    owner_id: str | None = None,
 ) -> None:
     feed = feed_for_endpoint(endpoint)
-    clean, _ = scrub(endpoint, payload)
+    clean, _ = scrub(endpoint, payload, owner_id=owner_id)
     source_file = write_response(profile, feed, clean, run_id, datetime.now(UTC), key=key)
     insert_response(conn, clean, source_file, profile, feed)
 
@@ -135,7 +159,12 @@ def _next_offset(
 
 
 def fetch_playlists(
-    api: SpotifyClient, conn: psycopg.Connection, profile: str, run_id: str, result: LoadResult
+    api: SpotifyClient,
+    conn: psycopg.Connection,
+    profile: str,
+    run_id: str,
+    result: LoadResult,
+    owner_id: str | None = None,
 ) -> list[PlaylistRef]:
     """Every playlist the token can see, paged to exhaustion. One stored response per page."""
     refs: list[PlaylistRef] = []
@@ -145,7 +174,15 @@ def fetch_playlists(
         payload = api.get(PLAYLISTS_PATH, {"limit": PLAYLIST_PAGE_LIMIT, "offset": offset})
         page += 1
         result.playlist_pages = page
-        _store(conn, profile, run_id, PLAYLISTS_PATH, payload, page_key(None, page))
+        _store(
+            conn,
+            profile,
+            run_id,
+            PLAYLISTS_PATH,
+            payload,
+            page_key(None, page),
+            owner_id=owner_id,
+        )
         for item in payload.get("items") or []:
             if not isinstance(item, dict) or not item.get("id"):
                 continue
@@ -216,11 +253,13 @@ def fetch_items(
     playlists unfetched and the round unable to answer Marc's question at all. The refusal is
     recorded and reported, which is the honest answer, and the run continues.
     """
+    statuses: list[int] = []
     for route in (ITEMS_ROUTE, TRACKS_ROUTE):
         path = f"/playlists/{ref.playlist_id}/{route}"
         try:
             _fetch_item_pages(api, conn, profile, run_id, ref, path, result)
         except SpotifyApiError as exc:
+            statuses.append(exc.status)
             result.refusals.append(f"{ref.playlist_id} via /{route}: {exc.status}")
             if route == ITEMS_ROUTE:
                 # One route's refusal is not a capability claim: try the documented older route.
@@ -228,14 +267,22 @@ def fetch_items(
             continue
         result.routes[ref.playlist_id] = route
         return
-    result.skipped.append(ref.playlist_id)
+    # 🚨 A 429 is not a refusal (R-058). Throttling says "not now"; 403 says "not ever, to you".
+    # Counting them together made a rate-limited run look like 176 inaccessible playlists when 78
+    # were refused and the rest were merely throttled — and ownership cannot be read off that.
+    if statuses and all(status == 429 for status in statuses):
+        result.throttled.append(ref.playlist_id)
+    else:
+        result.skipped.append(ref.playlist_id)
 
 
 def load(api: SpotifyClient, conn: psycopg.Connection, profile: str, run_id: str) -> LoadResult:
     """Fetch and store every playlist and every item. Measures its own cost."""
     result = LoadResult()
     started = time.monotonic()
-    for ref in fetch_playlists(api, conn, profile, run_id, result):
+    owner_id = profile_spotify_id(conn, profile)
+    result.ownership_resolved = owner_id is not None
+    for ref in fetch_playlists(api, conn, profile, run_id, result, owner_id):
         fetch_items(api, conn, profile, run_id, ref, result)
     result.elapsed_seconds = time.monotonic() - started
     result.calls = api.calls
@@ -399,18 +446,19 @@ def tier_table(
 def load_playlists(ctx: Any) -> pd.DataFrame:
     """Every playlist loaded, current version, with its observed track count.
 
-    No owner column: owner identity is discarded at ingest (R-054), so "is this mine?" is not
-    answerable from the warehouse. Stated in the notebook rather than guessed at.
+    No owner column — owner identity is discarded at ingest (R-054) — but `is_owned_by_profile`
+    answers "is this mine?" as a boolean computed before that discard (R-058).
     """
     return ctx.frame(
-        "select playlist.playlist_name, playlist.track_total, playlist.is_collaborative, "
+        "select playlist.playlist_name, playlist.track_total, "
+        "playlist.is_owned_by_profile, playlist.is_collaborative, "
         "playlist.is_public, playlist.valid_from::date as first_seen, "
         "count(member.content_uri) as tracks_loaded "
         "from {mart}.dim_playlist as playlist "
         "left join {mart}.fct_playlist_membership as member "
         "on member.playlist_key = playlist.playlist_key "
         "where playlist.is_current and playlist.playlist_key > 0 "
-        "group by 1, 2, 3, 4, 5 order by playlist.playlist_name"
+        "group by 1, 2, 3, 4, 5, 6 order by playlist.playlist_name"
     )
 
 
