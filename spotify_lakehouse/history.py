@@ -469,9 +469,15 @@ def emit_repeats(ctx: Any, export: pd.DataFrame) -> None:
     top["last_play"] = top["last_play"].dt.date
     _md("**The most-replayed tracks**, with how long they have been in rotation:")
     _show(redact_sample(top))
+    repeated = per_track[per_track["plays"] > 1]
+    total = len(per_track)
+    once_only = total - len(repeated)
+    share_once = 100 * once_only / total if total else 0
     _md(
-        f"Median span between a track's first and last play: "
-        f"**{per_track['span_years'].median():.1f} years** across {len(per_track):,} tracks."
+        f"**{once_only:,} of {total:,} tracks ({share_once:.0f}%) were played exactly once**, "
+        "so the median span across all tracks is zero by construction. Among the "
+        f"{len(repeated):,} played more than once the median span is "
+        f"**{repeated['span_years'].median():.1f} years**."
     )
 
 
