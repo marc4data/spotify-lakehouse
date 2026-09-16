@@ -1,6 +1,6 @@
 # Notebook Specifications
 
-Two notebooks, both rendered through **nb2report** into standalone HTML.
+Three notebooks, each rendered through **nb2report** into standalone HTML.
 
 ```bash
 uv run nb2report notebooks/01_data_inventory.ipynb \
@@ -12,9 +12,9 @@ uv run nb2report notebooks/01_data_inventory.ipynb \
 
 ---
 
-## 0. Shared requirements — both notebooks
+## 0. Shared requirements — every notebook
 
-**No connection logic in a notebook.** Both open with a single import cell:
+**No connection logic in a notebook.** Each opens with a single import cell:
 
 ```python
 from spotify_lakehouse.notebook import setup
@@ -236,6 +236,76 @@ missing instead of drawing.
   4,000 points of noise.
 
 **Multi-profile:** built for one profile at a time via `SPOT_PROFILE` (above), so the same notebook
-runs for `marie`, `brody`, `emma` once each is registered. A family comparison notebook (`03_family_comparison.ipynb`) is a
+runs for `marie`, `brody`, `emma` once each is registered. A family comparison notebook (`04_family_comparison.ipynb`, R-044) is a
 later round and is not specified here — it should not be attempted until §1–§6 are real for one
 person.
+
+---
+
+## 3. `03_history_profile.ipynb` — the export's own shape
+
+**Purpose:** profile the Extended Streaming History file itself — distributions, cardinalities, gaps and
+oddities — so that what nobody thought to ask about has somewhere to surface. Notebook 01 says what tables
+exist; notebook 02 answers questions about listening; this one characterises the source those answers rest
+on. Added by R-050.
+
+**Scope:** the export only, read from `stg_export__play_record` and the marts. **Zero API calls** — the
+API contributes a few hundred rows with no duration, and mixing them into a profile of the file would
+misstate every distribution here. Same `SPOT_PROFILE` mechanism as notebook 02 (R-009):
+`make report-03 PROFILE=<slug>` checks the slug against `spot_meta.profile_registry` first and renders
+`reports/03_history_profile_<slug>.html`.
+
+```
+# History Profile                                      (H1: report title)
+  [intro: what this profiles, which profile, that it reads the warehouse and calls no API]
+
+## 1. Coverage & Provenance                            [raw records and files, staged rows, window,
+                                                        hours, and the positive/zero/NULL duration split]
+
+## 2. Field Profile                                    [every column of stg_export__play_record: type and
+                                                        null rate from the database, cardinality, range
+                                                        and modal value from the run's rows]
+
+## 3. Temporal Shape
+### 3.1 Records per month                              [records and hours, captioned; months absent]
+### 3.2 Silent stretches                               [longest gaps, with the "silence is not absence"
+                                                        callout — a gap proves Spotify recorded nothing]
+### 3.3 Bursts                                         [heaviest days, and what was playing on the top one]
+### 3.4 Per-file coverage                              [each export file's rows and date span, and why
+                                                        overlapping spans are not duplicate rows]
+
+## 4. Content Shape
+### 4.1 The three URI types                            [track / episode / audiobook_chapter, by records
+                                                        and by hours — the two shares differ]
+### 4.2 The long tail                                  [items played ≥ N times; the play-count histogram]
+### 4.3 Resolution                                     [resolved vs unresolved plays and items, by type]
+### 4.4 Repeat behaviour                               [most-replayed tracks and their first→last span]
+
+## 5. Quality & Oddities                                (the section that earns the notebook)
+### 5.1 Zero-duration plays, and why they are not NULLs
+### 5.2 Empty reason_start and reason_end
+### 5.3 offline_timestamp's mixed units                 [seconds and milliseconds in one column]
+### 5.4 Duplicate natural keys                          [what the second-precision dedupe collapses]
+### 5.5 reason_end = trackerror
+### 5.6 What else the profiling found                   [generated from the data, not hand-listed, so a
+                                                        new oddity appears without a code change]
+
+## 6. Platform & Context
+### 6.1 Platform strings over time                      [device families by year, captioned]
+### 6.2 conn_country                                    [including ZZ, which is not a country]
+### 6.3 Skipped, shuffle, offline, incognito             [rates by year, captioned]
+```
+
+**A play with no duration is not a play of zero seconds.** `ms_played = 0` is the export recording that a
+play produced no listening time; NULL is the API recording nothing at all. They are counted separately
+everywhere — `history.duration_profile` returns both and never a total that folds one into the other, and
+`tests/test_history.py::test_a_play_with_no_duration_is_not_a_play_of_zero_seconds` fails if they merge.
+§5.1 is about the real zeros; conflating them is the failure that section exists to expose.
+
+**Every count is measured in the run.** No figure in the prose is typed from a prior round's report — the
+`trackerror` count, the collapsed-duplicate count and the millisecond-timestamp count all moved between
+R-003 and R-050, and a hard-coded number would have gone quietly stale.
+
+**PII:** platform strings are never displayed raw (they can name a device model, R-009) — they are grouped
+into families. Every sample passes `redact_sample`, which applies `redact_profile` plus R-042's
+identifier mask. `ip_addr` and `user_agent` are discarded at load and never reach the warehouse.

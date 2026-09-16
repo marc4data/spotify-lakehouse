@@ -3,7 +3,7 @@ CONFIG_DIR ?= $(HOME)/.config/spot
 COMPOSE := docker compose --env-file $(CONFIG_DIR)/.env
 
 .PHONY: help bootstrap db-up db-down migrate dbt-parse dbt-build dbt-test dbt-profile test lint format \
-	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 report-02 notebook worktree worktree-remove
+	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 report-02 report-03 notebook worktree worktree-remove
 
 help:
 	@echo "bootstrap    one command to make this checkout fully operational (idempotent)"
@@ -18,6 +18,7 @@ help:
 	@echo "notebook     start Jupyter Lab (uv run jupyter lab)"
 	@echo "report-01    execute and render notebooks/01_data_inventory.ipynb to reports/"
 	@echo "report-02 PROFILE=marc  render notebooks/02_listening_patterns.ipynb for one profile"
+	@echo "report-03 PROFILE=marc  render notebooks/03_history_profile.ipynb for one profile"
 	@echo "worktree NAME=wtc          create ../spotify-wtc, bootstrap it, print what it provisioned"
 	@echo "worktree-remove NAME=wtc   remove it, delete its branch if merged, drop its schemas"
 	@echo "test / lint / format"
@@ -88,6 +89,18 @@ report-02:
 		--author "Marc Alexander" --toc-depth 3 -o "reports/02_listening_patterns_$(PROFILE).html"
 	uv run nbstripout notebooks/02_listening_patterns.ipynb
 	@echo "Report: reports/02_listening_patterns_$(PROFILE).html (notebook outputs stripped again)"
+
+# The export's own profile: shape, distributions and oddities (R-050). Same PROFILE mechanism as 02.
+report-03:
+	@test -n "$(PROFILE)" || { echo "usage: make report-03 PROFILE=<slug>" >&2; exit 2; }
+	SPOT_PROFILE="$(PROFILE)" uv run python -m spotify_lakehouse.notebook
+	SPOT_PROFILE="$(PROFILE)" uv run jupyter nbconvert --to notebook --execute --inplace \
+		--ExecutePreprocessor.timeout=900 notebooks/03_history_profile.ipynb
+	mkdir -p reports
+	uv run --with-editable $(NB2REPORT) nb2report notebooks/03_history_profile.ipynb \
+		--author "Marc Alexander" --toc-depth 3 -o "reports/03_history_profile_$(PROFILE).html"
+	uv run nbstripout notebooks/03_history_profile.ipynb
+	@echo "Report: reports/03_history_profile_$(PROFILE).html (notebook outputs stripped again)"
 
 notebook:
 	uv run jupyter lab
