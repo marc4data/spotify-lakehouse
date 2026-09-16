@@ -20,6 +20,7 @@ from spotify_lakehouse import (
     export,
     migrate,
     musicbrainz,
+    playlists,
     poller,
     profiles,
     rate_limits,
@@ -506,6 +507,50 @@ def cmd_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_extract_playlists(args: argparse.Namespace) -> int:
+    """Ingest every playlist and its items. Takes spot_playlists, never spot_refresh (R-040)."""
+    profile = auth.validate_slug(args.profile)
+    settings = load_settings()
+    run_id = f"playlists-{session()}-{uuid.uuid4().hex[:8]}"
+    with (
+        connect(settings, autocommit=True) as conn,
+        try_advisory_lock(conn, playlists.LOCK_NAME) as acquired,
+    ):
+        if not acquired:
+            print(
+                f"spot extract-playlists: the {playlists.LOCK_NAME} lock is held elsewhere",
+                file=sys.stderr,
+            )
+            return 1
+        recorder = rate_limits.recorder(
+            conn, run_id=run_id, command="extract-playlists", profile=profile
+        )
+        with SpotifyClient.for_profile(profile, settings, on_rate_limited=recorder) as api:
+            try:
+                result = playlists.load(api, conn, profile, run_id)
+            except RetryAfterTooLong as exc:
+                print(f"spot extract-playlists: {exc}", file=sys.stderr)
+                return 2
+    print(
+        f"spot extract-playlists  profile={profile}  "
+        f"playlists={result.playlists} (pages {result.playlist_pages})  "
+        f"items={result.items_seen} (pages {result.item_pages})  "
+        f"calls={result.calls}  elapsed={result.elapsed_seconds:.1f}s"
+    )
+    print(f"  routes served: {result.route_counts}")
+    for note in result.fallbacks:
+        print(f"  fallback: {note}")
+    for note in result.refusals:
+        print(f"  refused: {note}")
+    for note in result.partial:
+        print(f"  partial: {note}")
+    if result.skipped:
+        print(f"  playlists neither route would serve: {len(result.skipped)}")
+    for note in result.unsafe_next:
+        print(f"  next-link refused: {note}", file=sys.stderr)
+    return 0
+
+
 def cmd_refresh(args: argparse.Namespace) -> int:
     if args.status:
         return _refresh_status()
@@ -655,6 +700,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-conn-country", action="store_true", help="drop conn_country (default: kept)"
     )
     p_publish.set_defaults(func=cmd_publish)
+
+    p_playlists = sub.add_parser(
+        "extract-playlists",
+        help="fetch every playlist and its items, paged to exhaustion (read scopes only)",
+    )
+    p_playlists.add_argument("--profile", default="marc")
+    p_playlists.set_defaults(func=cmd_extract_playlists)
 
     p_migrate = sub.add_parser("migrate", help="apply raw migrations and create session schemas")
     p_migrate.set_defaults(func=cmd_migrate)

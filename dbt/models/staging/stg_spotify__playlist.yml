@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: stg_spotify__playlist
+    description: >
+      One row per playlist per stored /me/playlists page (R-054). No owner column: owner identity is
+      discarded at ingest because it names someone other than Marc.
+    columns:
+      - name: playlist_id
+        tests: [not_null]
+      - name: playlist_name
+        tests: [not_null]
+      - name: snapshot_date
+        tests: [not_null]

@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: int_playlist_content
+    description: >
+      One row per distinct track seen in any playlist, from the playlist payload itself. The third
+      source of dim_content (R-054), beside plays and API track lookups.
+    columns:
+      - name: content_uri
+        tests: [unique, not_null]

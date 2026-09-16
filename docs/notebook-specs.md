@@ -1,6 +1,6 @@
 # Notebook Specifications
 
-Three notebooks, each rendered through **nb2report** into standalone HTML.
+Four notebooks, each rendered through **nb2report** into standalone HTML. (§4 is reserved for R-044's household comparison, which is parked and unbuilt, so the numbering skips it.)
 
 ```bash
 uv run nb2report notebooks/01_data_inventory.ipynb \
@@ -325,3 +325,62 @@ R-003 and R-050, and a hard-coded number would have gone quietly stale.
 **PII:** platform strings are never displayed raw (they can name a device model, R-009) — they are grouped
 into families. Every sample passes `redact_sample`, which applies `redact_profile` plus R-042's
 identifier mask. `ip_addr` and `user_agent` are discarded at load and never reach the warehouse.
+
+
+---
+
+## 5. `05_sandbox.ipynb` — scratch queries, and the playlist comparison
+
+**Purpose:** somewhere to try a query without disturbing 01, 02 or 03. Added by R-054 together with
+the playlist ingest its headline query needs — a sandbox shipped alone would have had §4 return zero
+rows, because no playlist had ever been stored.
+
+**Scope:** reads the warehouse, makes **zero API calls**. Same `SPOT_PROFILE` mechanism as 02 and 03
+(R-009): `make report-05 PROFILE=<slug>` checks the slug against `spot_meta.profile_registry` first
+and renders `reports/05_sandbox_<slug>.html`.
+
+```
+# Sandbox                                             (H1: report title)
+
+## 1. Connect                                         [setup(), and the profile it resolved]
+## 2. The API, in one screen                          [ctx.frame / ctx.rows / ctx.scalar / ctx.conn,
+                                                       each with a worked one-liner. It is
+                                                       `ctx.conn` — R-049 F5 shipped `ctx.con` in the
+                                                       section teaching people how to query]
+## 3. What you can query                              [a pointer to 01 §11's catalog, never a second
+                                                       copy of it: a copy drifts the first time a
+                                                       model lands]
+## 4. Playlist comparison
+### 4.1 The playlists that were loaded                [name, track count, first seen. No owner — see
+                                                       below]
+### 4.2 Resolving the two names                       [case-insensitive; zero or several matches
+                                                       print the candidates and stop]
+### 4.3 The answer                                    ["Tracks in A that are not in B", artist+title]
+### 4.4 All three tiers, side by side                 [URI / ISRC / normalized name. Tier 2's
+                                                       coverage share is printed, not assumed: it is
+                                                       1.3% of dim_content but 99.6% of playlist
+                                                       tracks, because the playlist payload carries
+                                                       external_ids.isrc itself]
+### 4.5 The other direction                           [B→A: the check that A→B is not an artefact of
+                                                       one playlist being larger]
+### 4.6 How much of this the warehouse already knew   [playlist tracks with no dim_content row]
+
+## 5. Scratch                                         [empty, and meant to stay that way in git]
+```
+
+**`miss` is directional and every output says so.** data-contracts §5: "47 misses between A and B" is
+meaningless; "47 tracks in A that are not in B" is the answer. `playlists.misses` returns a
+`DirectionalMiss` whose `label` carries the direction, and
+`tests/test_playlists.py::test_misses_are_directional` fails if the two directions ever return the
+same set.
+
+**No owner column, anywhere.** A playlist's owner is a person who is not necessarily Marc, and this
+repository is public, so `items[].owner.*` and `items[].added_by` are discarded at ingest (R-054) —
+discard beats redact, because a field never written cannot leak from a table nobody thought to check.
+The consequence is stated in §4.1 rather than worked around: **"is this playlist mine?" is not
+answerable from the warehouse.**
+
+**A sandbox is edited by design, and §7 wants a clean tree.** The resolution: the notebook is tracked
+at a known-good state, `nbstripout` strips outputs on commit as it does for every other notebook, and
+**§5 is committed empty** so a diff shows only what Marc added. His own edits are his to keep or
+discard; nothing here tries to stop him dirtying it.

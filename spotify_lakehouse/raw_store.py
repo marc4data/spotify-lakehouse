@@ -14,17 +14,40 @@ from psycopg.types.json import Jsonb
 
 from spotify_lakehouse.config import ConfigError, repo_root
 
-# Fields discarded before anything is persisted. data-contracts §3: email never reaches the
-# extractor; the scrub stays as a backstop.
-DISCARDED_FIELDS: dict[str, tuple[str, ...]] = {"/me": ("email",)}
+# Paths discarded before anything is persisted, keyed by FEED so an endpoint carrying an id
+# resolves too. data-contracts §3: email never reaches the extractor; the scrub stays as a backstop.
+#
+# 🚨 Playlists are the first feed carrying OTHER PEOPLE'S identities (R-054): a playlist has an
+# owner, and a collaborative one names a different person in `added_by` on every row. They are
+# discarded here rather than redacted downstream — a field that is never written cannot leak from a
+# table nobody thought to check (R-052 F2: that leak was in three tables, not one).
+#
+# Grammar: "a.b" descends a dict; "a[].b" descends every element of the list at `a`.
+DISCARDED_PATHS_BY_FEED: dict[str, tuple[str, ...]] = {
+    "me": ("email",),
+    "playlist": (
+        "items[].owner.id",
+        "items[].owner.display_name",
+        "items[].owner.uri",
+        "items[].owner.href",
+        "items[].owner.external_urls",
+        "items[].images",  # a playlist image can be a photograph the owner uploaded
+    ),
+    "playlist_item": (
+        "items[].added_by",  # whole object: id, uri, href and external_urls are all identifying
+    ),
+}
 
 # data-contracts §1: one raw table, one `feed` value per endpoint. Staging builds one view per feed.
 FEEDS_BY_ENDPOINT: dict[str, str] = {
     "/me": "me",
     "/me/player/recently-played": "recently_played",
+    "/me/playlists": "playlist",  # R-054
 }
 ARTIST_ENDPOINT = re.compile(r"/artists/[A-Za-z0-9]+")
 TRACK_ENDPOINT = re.compile(r"/tracks/[A-Za-z0-9]+")  # R-037
+# R-054. Bare `/playlists` still has no feed and still raises, which tests/test_raw_store.py pins.
+PLAYLIST_ITEMS_ENDPOINT = re.compile(r"/playlists/[A-Za-z0-9]+/(?:items|tracks)")
 FEED_NAME = re.compile(r"[a-z][a-z0-9_]*")
 FILE_KEY = re.compile(r"[A-Za-z0-9]+")
 
@@ -47,16 +70,47 @@ def feed_for_endpoint(endpoint: str) -> str:
         return "artist"
     if TRACK_ENDPOINT.fullmatch(endpoint):
         return "track"
+    if PLAYLIST_ITEMS_ENDPOINT.fullmatch(endpoint):
+        return "playlist_item"
     raise ValueError(f"No feed is defined for {endpoint!r}; add it to raw_store.FEEDS_BY_ENDPOINT.")
 
 
+def _discard(node: Any, parts: tuple[str, ...], removed: set[str], prefix: str) -> None:
+    """Delete one dotted path in place, recording every path actually removed."""
+    if not parts or not isinstance(node, dict):
+        return
+    head, rest = parts[0], parts[1:]
+    if head.endswith("[]"):
+        key = head[:-2]
+        sequence = node.get(key)
+        if isinstance(sequence, list):
+            for element in sequence:
+                _discard(element, rest, removed, f"{prefix}{head}.")
+        return
+    if not rest:
+        if head in node:
+            del node[head]
+            removed.add(f"{prefix}{head}")
+        return
+    _discard(node.get(head), rest, removed, f"{prefix}{head}.")
+
+
 def scrub(endpoint: str, payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """Return a copy of `payload` without discarded fields, plus the names that were removed."""
+    """Return a copy of `payload` without discarded fields, plus the paths that were removed.
+
+    Nested paths are supported because playlist PII is nested (R-054): the owner sits under
+    `items[].owner` and `added_by` under every item. An endpoint with no feed discards nothing
+    rather than raising, which is what the callers relied on before feeds were involved.
+    """
     clean = copy.deepcopy(payload)
-    removed = [name for name in DISCARDED_FIELDS.get(endpoint, ()) if name in clean]
-    for name in removed:
-        del clean[name]
-    return clean, removed
+    try:
+        feed = feed_for_endpoint(endpoint)
+    except ValueError:
+        return clean, []
+    removed: set[str] = set()
+    for path in DISCARDED_PATHS_BY_FEED.get(feed, ()):
+        _discard(clean, tuple(path.split(".")), removed, "")
+    return clean, sorted(removed)
 
 
 def write_response(

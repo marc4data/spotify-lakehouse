@@ -61,6 +61,8 @@ untracked work.
 | `make report-01` | Execute `notebooks/01_data_inventory.ipynb` (API, export, MusicBrainz, warehouse), render it to `reports/01_data_inventory.html`, strip its outputs again |
 | `make report-02 PROFILE=<slug>` | Execute `notebooks/02_listening_patterns.ipynb` for one registered profile (read from the warehouse, no API calls), render it to `reports/02_listening_patterns_<slug>.html`, strip its outputs again. An unregistered slug fails first, naming the registered ones |
 | `make report-03 PROFILE=<slug>` | Execute `notebooks/03_history_profile.ipynb` for one registered profile (the export's own shape, distributions and oddities; warehouse only, no API calls), render it to `reports/03_history_profile_<slug>.html`, strip its outputs again |
+| `make playlists PROFILE=<slug>` / `uv run spot extract-playlists --profile <p>` | Fetch every playlist and its items, paged to exhaustion, into `raw.api_response`. Read scopes only; takes the `spot_playlists` lock so the poller keeps running. Other people's `owner`/`added_by` identities are discarded before anything is stored |
+| `make report-05 PROFILE=<slug>` | Execute `notebooks/05_sandbox.ipynb` (scratch queries, and the playlist comparison) and render it to `reports/05_sandbox_<slug>.html` |
 | `make publish PROFILE=<slug>` / `uv run spot publish --profile <p>` | Regenerate `published/*.csv` (`plays_daily`, `artists`, `genres`, `coverage`) from the marts for Tableau Public, which cannot source a database. Excludes incognito plays and every device string by default. **Writes files; uploads nothing.** `published/` is gitignored |
 | `make worktree NAME=wtc` / `make worktree-remove NAME=wtc` | Create and provision / remove a parallel worktree (see "New worktree") |
 

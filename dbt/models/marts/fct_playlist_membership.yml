@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: fct_playlist_membership
+    description: >
+      Periodic snapshot of playlist contents, grain (snapshot_date, playlist_key, content_key).
+      Carries no added_by: it names other people and is discarded at ingest (R-054).
+    columns:
+      - name: snapshot_date
+        tests: [not_null]
+      - name: playlist_key
+        tests: [not_null]
+      - name: content_uri
+        tests: [not_null]

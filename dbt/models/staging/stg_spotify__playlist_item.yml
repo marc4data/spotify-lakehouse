@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: stg_spotify__playlist_item
+    description: >
+      One row per track per stored playlist-items page (R-054). No added_by column: it names a
+      different person on every row of a collaborative playlist and is discarded at ingest.
+    columns:
+      - name: playlist_id
+        tests: [not_null]
+      - name: content_uri
+        tests: [not_null]
+      - name: snapshot_date
+        tests: [not_null]

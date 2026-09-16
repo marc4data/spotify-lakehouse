@@ -15,7 +15,7 @@ sources:
               - not_null
               - accepted_values:
                   arguments:
-                    values: [me, recently_played, artist, track]
+                    values: [me, recently_played, artist, track, playlist, playlist_item]
           - name: profile_slug
             tests: [not_null]
       - name: external_response

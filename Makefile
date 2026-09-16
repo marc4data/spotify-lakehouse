@@ -3,7 +3,7 @@ CONFIG_DIR ?= $(HOME)/.config/spot
 COMPOSE := docker compose --env-file $(CONFIG_DIR)/.env
 
 .PHONY: help bootstrap db-up db-down migrate dbt-parse dbt-build dbt-test dbt-profile test lint format \
-	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 report-02 report-03 publish notebook worktree worktree-remove
+	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 report-02 report-03 report-05 publish playlists notebook worktree worktree-remove
 
 help:
 	@echo "bootstrap    one command to make this checkout fully operational (idempotent)"
@@ -19,7 +19,9 @@ help:
 	@echo "report-01    execute and render notebooks/01_data_inventory.ipynb to reports/"
 	@echo "report-02 PROFILE=marc  render notebooks/02_listening_patterns.ipynb for one profile"
 	@echo "report-03 PROFILE=marc  render notebooks/03_history_profile.ipynb for one profile"
+	@echo "playlists PROFILE=marc   fetch every playlist and its items into raw (spot_playlists lock)"
 	@echo "publish PROFILE=marc     regenerate published/*.csv from the marts (uploads nothing)"
+	@echo "report-05 PROFILE=marc  render notebooks/05_sandbox.ipynb for one profile"
 	@echo "worktree NAME=wtc          create ../spotify-wtc, bootstrap it, print what it provisioned"
 	@echo "worktree-remove NAME=wtc   remove it, delete its branch if merged, drop its schemas"
 	@echo "test / lint / format"
@@ -102,6 +104,24 @@ report-03:
 		--author "Marc Alexander" --toc-depth 3 -o "reports/03_history_profile_$(PROFILE).html"
 	uv run nbstripout notebooks/03_history_profile.ipynb
 	@echo "Report: reports/03_history_profile_$(PROFILE).html (notebook outputs stripped again)"
+
+# Playlist ingest (R-054). Read scopes only; takes spot_playlists so the 30-minute poller keeps
+# running (R-040). Cost is unknowable before the first call, so the command reports its own.
+playlists:
+	@test -n "$(PROFILE)" || { echo "usage: make playlists PROFILE=<slug>" >&2; exit 2; }
+	uv run spot extract-playlists --profile "$(PROFILE)"
+
+# The scratch notebook (R-054). Same PROFILE mechanism as 02 and 03.
+report-05:
+	@test -n "$(PROFILE)" || { echo "usage: make report-05 PROFILE=<slug>" >&2; exit 2; }
+	SPOT_PROFILE="$(PROFILE)" uv run python -m spotify_lakehouse.notebook
+	SPOT_PROFILE="$(PROFILE)" uv run jupyter nbconvert --to notebook --execute --inplace \
+		--ExecutePreprocessor.timeout=900 notebooks/05_sandbox.ipynb
+	mkdir -p reports
+	uv run --with-editable $(NB2REPORT) nb2report notebooks/05_sandbox.ipynb \
+		--author "Marc Alexander" --toc-depth 3 -o "reports/05_sandbox_$(PROFILE).html"
+	uv run nbstripout notebooks/05_sandbox.ipynb
+	@echo "Report: reports/05_sandbox_$(PROFILE).html (notebook outputs stripped again)"
 
 # Flat extracts for Tableau Public, which cannot source a database (CLAUDE.md §4, R-007).
 # published/ is gitignored: the files are derived and personal even though a workbook built on

@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: dim_playlist
+    description: >
+      One row per playlist version (SCD Type 2), plus the -1 unknown member. Carries no owner:
+      owner identity is discarded at ingest (R-054), so §3's "Type 2 on owner" cannot be built.
+    columns:
+      - name: playlist_key
+        tests: [unique, not_null]
+      - name: playlist_id
+        tests: [not_null]
+      - name: playlist_name
+        tests: [not_null]

@@ -53,6 +53,20 @@ orphans as (
     where d.genre_key is null
 
     union all
+    select 'fct_playlist_membership.playlist_key', m.playlist_key
+    from {{ ref('fct_playlist_membership') }} as m
+    left join {{ ref('dim_playlist') }} as d on d.playlist_key = m.playlist_key
+    where d.playlist_key is null
+
+    union all
+    -- R-054: a playlist can contain tracks nobody has played. This goes red if dim_content stops
+    -- accepting playlist membership as a source — which is the whole point of adding it.
+    select 'fct_playlist_membership.content_key', m.content_key
+    from {{ ref('fct_playlist_membership') }} as m
+    left join {{ ref('dim_content') }} as d on d.content_key = m.content_key
+    where d.content_key is null
+
+    union all
     select 'dim_track_detail.content_key', t.content_key
     from {{ ref('dim_track_detail') }} as t
     left join {{ ref('dim_content') }} as d on d.content_key = t.content_key

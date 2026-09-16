@@ -39,6 +39,29 @@ combined as (
     where not exists (
         select 1 from api_tracks where api_tracks.content_uri = export_content.content_uri
     )
+
+    union all
+
+    -- Third source (spot-main-R-054): a playlist can contain tracks nobody has played. Measured
+    -- before deciding — 638 distinct playlist tracks had no row here, 14.22% of membership rows —
+    -- and measured again afterwards: adding them moves **0** existing content_key values, because
+    -- they carry no first_seen_at and sort to the end of the row_number() ordering below.
+    select
+        playlist_content.content_uri,
+        playlist_content.content_type,
+        playlist_content.content_name,
+        playlist_content.parent_name,
+        playlist_content.primary_creator_name,
+        playlist_content.duration_ms,
+        false as is_resolved
+    from {{ ref('int_playlist_content') }} as playlist_content
+    where not exists (
+        select 1 from api_tracks where api_tracks.content_uri = playlist_content.content_uri
+    )
+    and not exists (
+        select 1 from {{ ref('int_export_content') }} as export_content
+        where export_content.content_uri = playlist_content.content_uri
+    )
 ),
 
 resolved as (

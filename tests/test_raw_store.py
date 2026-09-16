@@ -33,6 +33,9 @@ def test_scrub_leaves_other_endpoints_alone() -> None:
         ("/me/player/recently-played", "recently_played"),
         ("/artists/0abc123XYZ", "artist"),
         ("/tracks/0abc123XYZ", "track"),
+        ("/me/playlists", "playlist"),
+        ("/playlists/3cEYpjA9oz9GiPac4AsH4n/items", "playlist_item"),
+        ("/playlists/3cEYpjA9oz9GiPac4AsH4n/tracks", "playlist_item"),
     ],
 )
 def test_feed_for_endpoint(endpoint: str, feed: str) -> None:
@@ -85,3 +88,71 @@ def test_write_response_never_overwrites(repo: Path) -> None:
 def test_missing_data_raw_says_run_bootstrap(repo: Path) -> None:
     with pytest.raises(ConfigError, match="make bootstrap"):
         raw_store.raw_dir()
+
+
+# --- playlists carry other people's identities (spot-main-R-054) --------------------------------
+
+
+def _playlist_page() -> dict:
+    return {
+        "items": [
+            {
+                "id": "abc",
+                "name": "Smith",
+                "owner": {
+                    "id": "someone",
+                    "display_name": "Some One",
+                    "uri": "spotify:user:someone",
+                    "href": "https://api.spotify.com/v1/users/someone",
+                    "external_urls": {"spotify": "https://open.spotify.com/user/someone"},
+                    "type": "user",
+                },
+                "images": [{"url": "https://i.scdn.co/image/photo"}],
+                "tracks": {"total": 3},
+            }
+        ],
+        "next": None,
+    }
+
+
+def test_scrub_discards_playlist_owner_identity_and_images() -> None:
+    payload = _playlist_page()
+    clean, removed = raw_store.scrub("/me/playlists", payload)
+    owner = clean["items"][0]["owner"]
+    assert owner == {"type": "user"}, owner
+    assert "images" not in clean["items"][0]
+    assert clean["items"][0]["name"] == "Smith"  # the playlist name is Marc's own word, kept
+    assert clean["items"][0]["tracks"] == {"total": 3}
+    assert set(removed) == {
+        "items[].owner.id",
+        "items[].owner.display_name",
+        "items[].owner.uri",
+        "items[].owner.href",
+        "items[].owner.external_urls",
+        "items[].images",
+    }
+    assert payload["items"][0]["owner"]["id"] == "someone"  # input untouched
+
+
+def test_scrub_discards_added_by_on_every_item() -> None:
+    payload = {
+        "items": [
+            {"added_at": "2024-01-01T00:00:00Z", "added_by": {"id": "a"}, "track": {"uri": "x"}},
+            {"added_at": "2024-01-02T00:00:00Z", "added_by": {"id": "b"}, "track": {"uri": "y"}},
+        ]
+    }
+    clean, removed = raw_store.scrub("/playlists/3cEYpjA9oz9GiPac4AsH4n/items", payload)
+    assert all("added_by" not in item for item in clean["items"])
+    assert [item["added_at"] for item in clean["items"]] == [
+        "2024-01-01T00:00:00Z",
+        "2024-01-02T00:00:00Z",
+    ]
+    assert removed == ["items[].added_by"]
+
+
+def test_scrub_reports_nothing_when_there_was_nothing_to_discard() -> None:
+    """The positive control's other half: absence must be distinguishable from 'never looked'."""
+    payload = {"items": [{"added_at": "2024-01-01T00:00:00Z", "track": {"uri": "x"}}]}
+    clean, removed = raw_store.scrub("/playlists/3cEYpjA9oz9GiPac4AsH4n/items", payload)
+    assert clean == payload
+    assert removed == []

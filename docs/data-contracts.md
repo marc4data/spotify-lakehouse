@@ -328,7 +328,22 @@ Consequences Claude Code must handle and the notebook must state:
 **Grain: one row per (playlist, content, snapshot_date).** This is what makes overlap analysis
 possible over time rather than only right now. Snapshotted on every full refresh, not every poll.
 
-Carries `added_at`, `added_by_profile_key` (collaborative playlists), `position`.
+Carries `added_at`, `position`, `content_uri`, and the track's own name/creator/ISRC as observed in
+the playlist.
+
+> [!WARNING]
+> **`added_by_profile_key` is NOT built, amended by spot-main-R-054.** This row previously contracted
+> it for collaborative playlists. A collaborative playlist names **a different person in `added_by`
+> on every item**, and this repository is public, so `items[].added_by` is discarded at ingest and
+> never reaches `raw` — discard beats redact, because a field that is never written cannot leak from
+> a table nobody thought to check (R-052 F2). Marc has not asked who added what, and R-044 already
+> rules that "who introduced whom" is an inference rather than a measurement. Restoring the column
+> means deciding to store other people's identities first; it is not a modelling change.
+
+> [!NOTE]
+> **`content_key` is not defaulted to the `-2` pending member (R-054).** A playlist can contain
+> tracks nobody has played, and collapsing them onto one key would make them indistinguishable —
+> which is exactly the row "in A, not in B" is hunting. See §3's `dim_content` note.
 
 ### `fct_library_snapshot` — periodic snapshot
 **Grain: one row per (profile, content, snapshot_date)** for saved tracks/albums.
@@ -342,6 +357,19 @@ comparing Spotify's ranking to ours is itself interesting.
 ---
 
 ## 5. Playlist comparison semantics
+
+> [!NOTE]
+> **Built by spot-main-R-054.** All three tiers are implemented in
+> `spotify_lakehouse/playlists.py` (`misses`, `tier_table`) and shown side by side in
+> `notebooks/05_sandbox.ipynb` §4. `miss_count` is directional and every output carries its
+> direction in a label, which `tests/test_playlists.py::test_misses_are_directional` keeps
+> true. ⚠️ **Tier 2's reach depends on which side you ask about, and the two answers differ by
+> two orders of magnitude.** Across `dim_content` as a whole, ISRC lands only on API-resolved
+> tracks — **624 of 48,784 rows (1.3%)**, measured 2026-09-16. But a *playlist* payload carries
+> `external_ids.isrc` on the track object itself, so for playlist membership tier 2 covers
+> **3,554 of 3,568 tracks (99.6%)**. Quote the coverage share beside the count, always: the
+> unqualified sentence "tier 2 only covers API-resolved tracks" is true of the warehouse and
+> misleading about the comparison.
 
 Marc's stated goal: "compare playlists to overlaps and misses." Two different questions, both built:
 
