@@ -486,6 +486,26 @@ def _refresh_status() -> int:
     return 0
 
 
+def cmd_publish(args: argparse.Namespace) -> int:
+    """Regenerate published/*.csv from the marts. Writes files; uploads nothing (R-007)."""
+    from spotify_lakehouse import publish
+
+    options = publish.Options(
+        profile=args.profile,
+        exclude_incognito=not args.include_incognito,
+        include_platform_family=args.platform_family,
+        include_conn_country=not args.no_conn_country,
+    )
+    settings = load_settings()
+    with connect(settings) as conn:
+        results = publish.write_extracts(conn, options)
+    for result in results:
+        span = f"{result.date_min} to {result.date_max}" if result.date_min else "no date column"
+        print(f"{result.path}: {result.rows:,} rows, {len(result.columns)} columns, {span}")
+    print("Nothing was uploaded. published/ is gitignored.")
+    return 0
+
+
 def cmd_refresh(args: argparse.Namespace) -> int:
     if args.status:
         return _refresh_status()
@@ -616,6 +636,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_drop.add_argument("session_name", metavar="session", help="worktree session, e.g. wtc")
     p_drop.set_defaults(func=cmd_drop_session_schemas)
+
+    p_publish = sub.add_parser(
+        "publish", help="regenerate published/*.csv from the marts (writes files, uploads nothing)"
+    )
+    p_publish.add_argument("--profile", default="marc", help="one profile per run")
+    p_publish.add_argument(
+        "--include-incognito",
+        action="store_true",
+        help="keep plays marked private in the export (default: excluded)",
+    )
+    p_publish.add_argument(
+        "--platform-family",
+        action="store_true",
+        help="add a device family column (never the raw platform string)",
+    )
+    p_publish.add_argument(
+        "--no-conn-country", action="store_true", help="drop conn_country (default: kept)"
+    )
+    p_publish.set_defaults(func=cmd_publish)
 
     p_migrate = sub.add_parser("migrate", help="apply raw migrations and create session schemas")
     p_migrate.set_defaults(func=cmd_migrate)

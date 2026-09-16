@@ -61,6 +61,7 @@ untracked work.
 | `make report-01` | Execute `notebooks/01_data_inventory.ipynb` (API, export, MusicBrainz, warehouse), render it to `reports/01_data_inventory.html`, strip its outputs again |
 | `make report-02 PROFILE=<slug>` | Execute `notebooks/02_listening_patterns.ipynb` for one registered profile (read from the warehouse, no API calls), render it to `reports/02_listening_patterns_<slug>.html`, strip its outputs again. An unregistered slug fails first, naming the registered ones |
 | `make report-03 PROFILE=<slug>` | Execute `notebooks/03_history_profile.ipynb` for one registered profile (the export's own shape, distributions and oddities; warehouse only, no API calls), render it to `reports/03_history_profile_<slug>.html`, strip its outputs again |
+| `make publish PROFILE=<slug>` / `uv run spot publish --profile <p>` | Regenerate `published/*.csv` (`plays_daily`, `artists`, `genres`, `coverage`) from the marts for Tableau Public, which cannot source a database. Excludes incognito plays and every device string by default. **Writes files; uploads nothing.** `published/` is gitignored |
 | `make worktree NAME=wtc` / `make worktree-remove NAME=wtc` | Create and provision / remove a parallel worktree (see "New worktree") |
 
 ## Notebooks and reports

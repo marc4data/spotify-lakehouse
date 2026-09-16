@@ -3,7 +3,7 @@ CONFIG_DIR ?= $(HOME)/.config/spot
 COMPOSE := docker compose --env-file $(CONFIG_DIR)/.env
 
 .PHONY: help bootstrap db-up db-down migrate dbt-parse dbt-build dbt-test dbt-profile test lint format \
-	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 report-02 report-03 notebook worktree worktree-remove
+	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 report-02 report-03 publish notebook worktree worktree-remove
 
 help:
 	@echo "bootstrap    one command to make this checkout fully operational (idempotent)"
@@ -19,6 +19,7 @@ help:
 	@echo "report-01    execute and render notebooks/01_data_inventory.ipynb to reports/"
 	@echo "report-02 PROFILE=marc  render notebooks/02_listening_patterns.ipynb for one profile"
 	@echo "report-03 PROFILE=marc  render notebooks/03_history_profile.ipynb for one profile"
+	@echo "publish PROFILE=marc     regenerate published/*.csv from the marts (uploads nothing)"
 	@echo "worktree NAME=wtc          create ../spotify-wtc, bootstrap it, print what it provisioned"
 	@echo "worktree-remove NAME=wtc   remove it, delete its branch if merged, drop its schemas"
 	@echo "test / lint / format"
@@ -101,6 +102,13 @@ report-03:
 		--author "Marc Alexander" --toc-depth 3 -o "reports/03_history_profile_$(PROFILE).html"
 	uv run nbstripout notebooks/03_history_profile.ipynb
 	@echo "Report: reports/03_history_profile_$(PROFILE).html (notebook outputs stripped again)"
+
+# Flat extracts for Tableau Public, which cannot source a database (CLAUDE.md §4, R-007).
+# published/ is gitignored: the files are derived and personal even though a workbook built on
+# them is destined to be public. This target writes files and uploads nothing.
+publish:
+	@test -n "$(PROFILE)" || { echo "usage: make publish PROFILE=<slug>" >&2; exit 2; }
+	uv run spot publish --profile "$(PROFILE)"
 
 notebook:
 	uv run jupyter lab
