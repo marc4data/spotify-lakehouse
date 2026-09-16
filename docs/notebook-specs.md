@@ -112,6 +112,18 @@ sample of each, so the breadth (and the holes) are visible in one document. Rena
 ### 10.3 dim_artist — SCD Type 2 on sourced genres
 ### 10.4 dim_genre and br_artist_genre
 ### 10.5 The allocation reconciliation — four steps and their residuals
+
+## 11. The Queryable Catalog                           (added R-049, for "what can I query at all".
+                                                       Introspected at run time from information_schema
+                                                       and pg_catalog — never hand-typed, or it goes
+                                                       stale the first time a model lands)
+### 11.1 Connecting, and where the schema names come from  [ctx.frame/rows/scalar; session-scoped
+                                                       schema names as found; analytics measured]
+### 11.2 Start here                                    [the five objects that answer most questions]
+### 11.3 Three worked joins                            [plays → content → artist → genre]
+### 11.4 The full catalog                              [every object, by layer: kind, rows counted in
+                                                       the run, columns, its own header comment, and a
+                                                       runnable example query that is executed]
 ```
 
 **Sections 6 and 7 are not optional and not filler.** Section 6 is the single most useful page in the
