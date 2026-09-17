@@ -472,6 +472,10 @@ def load_membership(ctx: Any) -> pd.DataFrame:
         "select playlist.playlist_name, member.snapshot_date, "
         "coalesce(member.primary_creator_name, content.primary_creator_name) as artist, "
         "coalesce(member.content_name, content.content_name) as title, "
+        # `dim_content.parent_name` is 100% populated for playlist tracks on both sides, measured
+        # R-059. `dim_album` via `dim_track_detail` reaches only 107 of 1,153 (9%), because that
+        # path needs an API-resolved track — a column that exists is not a column that has data.
+        "content.parent_name as album, "
         "member.content_uri, "
         "coalesce(member.isrc, detail.isrc) as isrc, "
         "coalesce(content.content_match_key, "
@@ -498,3 +502,74 @@ def orphan_summary(ctx: Any) -> pd.DataFrame:
         "from {mart}.fct_playlist_membership as member "
         "left join {mart}.dim_content as content on content.content_uri = member.content_uri"
     )
+
+
+@dataclass(frozen=True)
+class MissSplit:
+    """The tier-1 misses, split into what is genuinely absent and what merely wears another URI.
+
+    R-059, answering Marc directly: a track missing by URI is not necessarily missing. `absent` is
+    the list to act on; `rehoused` is a cataloguing difference, and its album columns are what make
+    that legible.
+
+    The two are disjoint by construction and their union is exactly the tier-1 miss set —
+    `tests/test_playlists.py::test_list_a_and_list_b_partition_the_tier_one_misses` keeps that true.
+    """
+
+    left_name: str
+    right_name: str
+    absent: pd.DataFrame
+    rehoused: pd.DataFrame
+
+    @property
+    def absent_label(self) -> str:
+        return f"In {self.left_name}, absent from {self.right_name} at every tier"
+
+    @property
+    def rehoused_label(self) -> str:
+        return f"In {self.left_name} and in {self.right_name}, under a different URI"
+
+
+def split_misses(
+    left: pd.DataFrame, right: pd.DataFrame, *, left_name: str, right_name: str
+) -> MissSplit:
+    """Split the tier-1 misses by whether tier 2 or tier 3 finds them on the other side."""
+    tier_one = misses(left, right, left_name=left_name, right_name=right_name, tier="content_uri")
+    rows = tier_one.rows.copy()
+    if rows.empty:
+        empty = rows.assign(matched_tier=pd.Series(dtype="object"))
+        return MissSplit(left_name, right_name, empty, empty)
+
+    isrc_keys = set(right["isrc"].dropna()) if len(right) else set()
+    name_keys = set(right["content_match_key"].dropna()) if len(right) else set()
+    by_isrc = rows["isrc"].notna() & rows["isrc"].isin(isrc_keys)
+    by_name = rows["content_match_key"].notna() & rows["content_match_key"].isin(name_keys)
+
+    rows["matched_tier"] = [
+        "isrc + name" if i and n else "isrc" if i else "name" if n else ""
+        for i, n in zip(by_isrc, by_name, strict=True)
+    ]
+    absent = rows[~(by_isrc | by_name)].drop(columns=["matched_tier"]).reset_index(drop=True)
+    rehoused = rows[by_isrc | by_name].reset_index(drop=True)
+
+    # the other side's album, so "sourced from a different album" is visible rather than asserted
+    if len(rehoused):
+        other = right[["isrc", "content_match_key", "album", "content_uri"]].rename(
+            columns={"album": "album_other_side", "content_uri": "uri_other_side"}
+        )
+        by_isrc_join = rehoused.merge(
+            other.dropna(subset=["isrc"]).drop_duplicates("isrc"), on="isrc", how="left"
+        )
+        need = by_isrc_join["album_other_side"].isna()
+        if need.any():
+            fallback = rehoused.loc[need.values].merge(
+                other.dropna(subset=["content_match_key"]).drop_duplicates("content_match_key")[
+                    ["content_match_key", "album_other_side", "uri_other_side"]
+                ],
+                on="content_match_key",
+                how="left",
+            )
+            for column in ("album_other_side", "uri_other_side"):
+                by_isrc_join.loc[need.values, column] = fallback[column].to_numpy()
+        rehoused = by_isrc_join
+    return MissSplit(left_name, right_name, absent, rehoused)

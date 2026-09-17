@@ -419,6 +419,25 @@ single and an album has two URIs and will read as a miss.
 All three are exposed and the notebook shows them side by side, because the gap between tiers is itself the
 story: tier 1 to tier 2 is re-issue churn, tier 2 to tier 3 is genuine ambiguity.
 
+> [!WARNING]
+> **"Most reliable first" orders reliability, not containment — the tiers are NOT nested.** Amended by
+> spot-main-R-059, which measured it: against `Smith` → `Connor's Playlist (MFA)`, tier 1 missed 40,
+> tier 2 missed 30, and tier 3 — the *loose* tier — missed **31**. A looser match cannot miss more
+> than a stricter one if the ladder nests, so it does not. Measured set relations: `tier2 ⊆ tier1` ✅,
+> `tier3 ⊆ tier1` ✅, **`tier3 ⊄ tier2`** ❌.
+>
+> **Two mechanisms, both observed in the payload:**
+> 1. **The normalized key breaks where an ISRC matches.** `JAŸ-Z` is stored with a diaeresis on one
+>    side and as `jay-z` on the other, so `content_match_key` differs while `external_ids.isrc` is
+>    identical — tier 3 misses `Otis` and `Ni**as In Paris`, tier 2 matches both.
+> 2. **One recording carries two ISRCs.** Drake's `Forever` is `USUM70920707` on *Relapse: Refill*
+>    and `USUM70985104` on *Forever*, so tier 2 misses it while tier 3's name key matches.
+>
+> **Consequence for anyone reading a tier count:** a track absent at tier 2 may still be present, and
+> a track absent at tier 3 may still be present. "Absent" means absent **at every tier** — which is
+> what `playlists.split_misses` computes, and why its two lists are the answer rather than any single
+> tier's number.
+
 ---
 
 ## 6. Open contract items
