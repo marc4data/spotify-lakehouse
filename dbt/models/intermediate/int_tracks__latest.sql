@@ -24,7 +24,14 @@ ranked as (
         row_number() over (
             partition by content_uri
             order by ingested_at desc, played_at_utc desc nulls last, raw_response_id desc, item_ordinal
-        ) as recency_rank
+        ) as recency_rank,
+        -- Order-invariant tier-3 key (spot-main-R-060), built before the recency filter so it sees every
+        -- observation rather than the winning one. This branch did not need rescuing — measured 2026-09-16,
+        -- **0** of 128 multi-observation URIs disagree on (content_name, primary artist) and 0 rows tie on the
+        -- full ORDER BY — but the key is written this way so the property holds by construction, not because
+        -- the API happens to be self-consistent today.
+        min({{ content_match_key('content_name', "album_artists -> 0 ->> 'name'") }})
+            over (partition by content_uri) as content_match_key
     from observations
 ),
 
@@ -52,6 +59,7 @@ select
     ranked.album_name,
     ranked.track_artists,
     ranked.album_artists,
+    ranked.content_match_key,
     seen.first_seen_at,
     seen.last_seen_at
 from ranked

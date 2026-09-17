@@ -8,3 +8,9 @@ models:
     columns:
       - name: content_uri
         tests: [unique, not_null]
+      - name: content_match_key
+        description: >
+          The tier-3 loose match key (data-contracts §5), order-invariant since spot-main-R-060.
+          This source was measured clean — 0 URIs disagree, 0 can tie — but the key is built the
+          same way here so the property holds by construction rather than by the payload's good
+          behaviour.

@@ -6,3 +6,8 @@ models:
     columns:
       - name: content_uri
         tests: [unique, not_null]
+      - name: content_match_key
+        description: >
+          The tier-3 loose match key (data-contracts §5), order-invariant since spot-main-R-060.
+          Measured clean before the change (0 of 128 multi-observation URIs disagree); built this
+          way regardless so the guarantee does not rest on the API staying self-consistent.

@@ -6,3 +6,40 @@ models:
     columns:
       - name: content_uri
         tests: [unique, not_null]
+      - name: content_match_key
+        description: >
+          The tier-3 loose match key (data-contracts §5), order-invariant since spot-main-R-060:
+          the minimum folded key over every observation of the URI, not the most recent one's.
+
+unit_tests:
+  - name: match_key_ignores_which_observation_arrived_last
+    description: >
+      The guard for spot-main-R-060. Fixed fixture, independent of what the export contains.
+
+      Two URIs, each failing a different half of the old expression, so neither passes by
+      construction — the trap the round prompt names explicitly:
+
+      * `t1` proves the SELECTION rule. The newest play says `Zoo Station`, an older one says
+        `Achtung Baby`, and no normalization can reconcile those two strings. Under the old
+        recency-wins expression the key was `zoo station|u2`; `min()` makes it `achtung baby|u2`
+        no matter which play is newest.
+      * `t2` proves the FOLD. Both plays are `Otis`, but the newest spells the artist `JAŸ-Z`.
+        The old expression carried the diaeresis into the key as `otis|jaÿ-z`, which is precisely
+        the tier-3 miss R-059 measured against a matching ISRC.
+
+      Note the display attributes still track recency — `content_name` is `Zoo Station`, the newest
+      spelling — because only the key was ever the problem.
+    model: int_export_content
+    given:
+      - input: ref('stg_export__play_record')
+        rows:
+          # t1: the newer play sorts LATER than the older one, so recency and min() disagree
+          - {raw_record_id: 1, content_uri: "spotify:track:t1", content_type: track, ended_at_utc: "2026-01-01 00:00:00+00", track_name: "Achtung Baby", album_name: "Achtung Baby", album_artist_name: "U2"}
+          - {raw_record_id: 2, content_uri: "spotify:track:t1", content_type: track, ended_at_utc: "2026-01-02 00:00:00+00", track_name: "Zoo Station", album_name: "Achtung Baby", album_artist_name: "U2"}
+          # t2: same title both times; the newest play is the one carrying the diaeresis
+          - {raw_record_id: 3, content_uri: "spotify:track:t2", content_type: track, ended_at_utc: "2026-01-01 00:00:00+00", track_name: "Otis", album_name: "Watch The Throne", album_artist_name: "JAY-Z"}
+          - {raw_record_id: 4, content_uri: "spotify:track:t2", content_type: track, ended_at_utc: "2026-01-02 00:00:00+00", track_name: "Otis", album_name: "Watch The Throne", album_artist_name: "JAŸ-Z"}
+    expect:
+      rows:
+        - {content_uri: "spotify:track:t1", content_type: track, content_name: "Zoo Station", parent_name: "Achtung Baby", primary_creator_name: "U2", content_match_key: "achtung baby|u2"}
+        - {content_uri: "spotify:track:t2", content_type: track, content_name: "Otis", parent_name: "Watch The Throne", primary_creator_name: "JAŸ-Z", content_match_key: "otis|jay-z"}
