@@ -75,6 +75,76 @@ table.dataframe thead th {
 """
 
 
+def aligned_table_html(frame: pd.DataFrame) -> str | None:
+    """A DataFrame rendered with strings left-aligned and numbers right-aligned, or None.
+
+    Marc, 2026-09-17: string columns read as right-aligned when running cells in VS Code.
+    `TABLE_CSS` fixes the rendered report, but it is injected once as the setup cell's output and
+    VS Code renders each cell's output in its own context, so a stylesheet from one cell need not
+    reach another. pandas has no such problem because it emits a `<style>` block with EVERY table —
+    so this does the same, via `Styler`, and the alignment travels with the table it describes.
+
+    Returning None means "no opinion": the caller falls back to pandas' own renderer. That happens
+    whenever styling would change behaviour rather than just appearance:
+
+    * **Frames pandas would truncate.** `_repr_html_` honours `display.max_rows`; `Styler` does not,
+      and would render all of a long frame — measured at 3.1x the bytes for 500 rows. The options
+      are read at call time, never baked in, because `_configure_libraries` changes them after
+      import (and `display.max_columns` is 0 by default, which means *unlimited*, so a naive `>`
+      comparison misfires).
+    * **Non-unique columns or index.** `Styler.apply`/`.map` raise `KeyError` on these — measured,
+      not guessed — and a raise inside `_repr_html_` breaks the cell's whole output, which is far
+      worse than misaligned text.
+
+    `class="dataframe"` is pinned deliberately: nb2report detects tables with a plain
+    `'dataframe' in html` substring test (`parser.py:178`), and without it the report would silently
+    lose its table wrapper and column sorting.
+
+    The emitted rules are id-scoped (`#T_xxx…`) and `!important`, so they beat TABLE_CSS's blanket
+    `table.dataframe td { text-align: left !important }` on specificity — an id (1,0,0) outranks a
+    class-plus-elements selector (0,1,2). Without `!important` on both sides that blanket rule would
+    silently flatten the numeric columns back to the left.
+    """
+    max_rows = pd.get_option("display.max_rows")
+    if max_rows and len(frame) > max_rows:
+        return None
+    if frame.size > pd.get_option("styler.render.max_elements"):
+        return None
+    if not frame.columns.is_unique or not frame.index.is_unique:
+        return None
+
+    numeric = frame.select_dtypes("number").columns.tolist()
+    other = [column for column in frame.columns if column not in numeric]
+    try:
+        styler = frame.style.set_table_attributes('border="1" class="dataframe"').set_table_styles(
+            [{"selector": "th", "props": [("text-align", "left !important")]}]
+        )
+        if other:
+            styler = styler.set_properties(subset=other, **{"text-align": "left !important"})
+        if numeric:
+            styler = styler.set_properties(subset=numeric, **{"text-align": "right !important"})
+        return styler.to_html()
+    except Exception:  # noqa: BLE001 - a repr must never raise; fall back to pandas'
+        return None
+
+
+def _install_dataframe_alignment() -> None:
+    """Route `display(df)` through `aligned_table_html`, falling back to pandas untouched.
+
+    Idempotent on purpose: re-running a notebook's setup cell calls this again, and without the
+    marker each call would wrap the previous wrapper.
+    """
+    original = pd.DataFrame._repr_html_
+    if getattr(original, "_spot_aligned", False):
+        return
+
+    def _repr_html_(self: pd.DataFrame) -> str | None:
+        return aligned_table_html(self) or original(self)
+
+    _repr_html_._spot_aligned = True  # type: ignore[attr-defined]
+    pd.DataFrame._repr_html_ = _repr_html_  # type: ignore[method-assign]
+
+
 @dataclass
 class NotebookContext:
     profile: str
@@ -163,6 +233,10 @@ def _configure_libraries(table_css: bool) -> None:
         from IPython.display import HTML, display
 
         display(HTML(TABLE_CSS))
+        # The stylesheet above covers the rendered report; this covers the notebook UI, where a
+        # style from one cell's output need not reach another's. Gated by the same flag so tests
+        # opt out of both presentation side effects, pandas' global _repr_html_ included.
+        _install_dataframe_alignment()
 
 
 def registered_profiles(conn: psycopg.Connection) -> list[str]:
