@@ -356,7 +356,13 @@ and renders `reports/05_sandbox_<slug>.html`.
                                                        below]
 ### 4.2 Resolving the two names                       [case-insensitive; zero or several matches
                                                        print the candidates and stop]
-### 4.3 The answer                                    ["Tracks in A that are not in B", artist+title]
+### 4.3 The answer                                    ["Tracks in A that are not in B", artist+title,
+                                                       then the SAME list narrowed twice: no URI and
+                                                       no ISRC match, then no match at any tier. The
+                                                       rows between the two are named, not dropped —
+                                                       the name tier over-matches (R-060), so which
+                                                       list you act on is a judgement the notebook
+                                                       shows rather than makes]
 ### 4.4 All three tiers, side by side                 [URI / ISRC / normalized name. Tier 2's
                                                        coverage share is printed, not assumed: it is
                                                        1.3% of dim_content but 99.6% of playlist
@@ -365,6 +371,16 @@ and renders `reports/05_sandbox_<slug>.html`.
 ### 4.5 The other direction                           [B→A: the check that A→B is not an artefact of
                                                        one playlist being larger]
 ### 4.6 How much of this the warehouse already knew   [playlist tracks with no dim_content row]
+### 4.7 Why the three tiers disagree                  [the subset relations, COMPUTED not asserted.
+                                                       R-059 measured the ladder non-nested; R-060's
+                                                       fold removed that violation for this pair, so
+                                                       the prose must never outlive the table under
+                                                       it — added R-059, corrected R-060]
+### 4.8 The two lists                                 [List A absent at every tier; List B the same
+                                                       recording under another URI, with the album
+                                                       on each side. Added R-059]
+### 4.9 The named validation case: `Heaven`           [both sides credit Los Lonely Boys, so tier 3
+                                                       is testing the title alone. Added R-059]
 
 ## 5. Scratch                                         [empty, and meant to stay that way in git]
 ```

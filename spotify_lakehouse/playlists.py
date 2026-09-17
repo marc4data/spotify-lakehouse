@@ -505,6 +505,75 @@ def orphan_summary(ctx: Any) -> pd.DataFrame:
 
 
 @dataclass(frozen=True)
+class IdentifierMiss:
+    """Tier-1 misses that also miss at tier 2: neither the URI nor the ISRC is on the other side.
+
+    Marc's request, 2026-09-16. `split_misses().absent` also clears a track when the **normalized
+    name** matches, and R-060 measured that tier over-matching twice on real data — a 1982
+    `Peer Gynt` recording and the "Can I Kick It" intro edit of `Bonita Applebum` both collide with
+    the standard versions. "The name matched" is therefore weaker evidence than "the ISRC matched",
+    and this list is the one that does not lean on it.
+
+    `rows` holds every track with neither identifier on the other side; `cleared_by_name` marks the
+    ones a tier-3 match would have removed, so the gap between the two lists is visible rather than
+    silently dropped. Removing them yields exactly `split_misses().absent` —
+    `tests/test_playlists.py::test_identifier_misses_minus_the_name_clears_is_list_a` keeps that
+    true, which is what lets the two be shown side by side without either being re-derived.
+    """
+
+    left_name: str
+    right_name: str
+    rows: pd.DataFrame
+
+    @property
+    def miss_count(self) -> int:
+        return len(self.rows)
+
+    @property
+    def label(self) -> str:
+        return f"Tracks in {self.left_name} with no URI and no ISRC match in {self.right_name}"
+
+    @property
+    def strict(self) -> pd.DataFrame:
+        """The rows no normalized-name match clears — identical to `split_misses().absent`."""
+        if not len(self.rows):
+            return self.rows
+        return self.rows[~self.rows["cleared_by_name"]].reset_index(drop=True)
+
+    @property
+    def cleared(self) -> pd.DataFrame:
+        """The gap between the two lists: present on the other side only by the loose name tier."""
+        if not len(self.rows):
+            return self.rows
+        return self.rows[self.rows["cleared_by_name"]].reset_index(drop=True)
+
+
+def identifier_misses(
+    left: pd.DataFrame, right: pd.DataFrame, *, left_name: str, right_name: str
+) -> IdentifierMiss:
+    """Tier-1 misses that also miss at tier 2, with the tier-3 clears marked rather than removed."""
+    tier_one = misses(left, right, left_name=left_name, right_name=right_name, tier="content_uri")
+    tier_two = misses(left, right, left_name=left_name, right_name=right_name, tier="isrc")
+
+    # Intersect explicitly rather than leaning on `tier2 ⊆ tier1`. That relation measures as holding
+    # and §4.7 of the notebook renders it, but it is not structural: a track matching by URI while
+    # carrying no ISRC on one side would be a tier-2 miss that is NOT a tier-1 miss, and playlist
+    # ISRC coverage is 99.6%, not 100% (data-contracts §5).
+    without_isrc_match = set(tier_two.rows["content_uri"])
+    rows = tier_one.rows[tier_one.rows["content_uri"].isin(without_isrc_match)].copy()
+
+    name_keys = set(right["content_match_key"].dropna()) if len(right) else set()
+    if len(rows):
+        rows["cleared_by_name"] = rows["content_match_key"].notna() & rows[
+            "content_match_key"
+        ].isin(name_keys)
+    else:
+        rows["cleared_by_name"] = pd.Series(dtype=bool)
+
+    return IdentifierMiss(left_name, right_name, rows.reset_index(drop=True))
+
+
+@dataclass(frozen=True)
 class MissSplit:
     """The tier-1 misses, split into what is genuinely absent and what merely wears another URI.
 

@@ -194,6 +194,67 @@ RIGHT = _split_frame(
 )
 
 
+# The LEFT/RIGHT pair above carries no name-only match, so a guard written against it would pass
+# without ever exercising the gap — true by construction. This pair reproduces the case the live
+# data actually shows: one recording carrying two ISRCs across two album releases (Drake's
+# `Forever`, USUM70985104 against USUM70920707, measured 2026-09-16), which tier 2 misses and the
+# name tier clears.
+GAP_LEFT = _split_frame(
+    [
+        ("Drake", "Forever", "Forever", "spotify:track:g1", "USUM70985104"),
+        ("Aretha Franklin", "Respect", "I Never Loved", "spotify:track:g2", "USA111"),
+        ("Los Lonely Boys", "Heaven", "Very Best Of", "spotify:track:g3", "USSM10315916"),
+    ]
+)
+GAP_RIGHT = _split_frame(
+    [
+        ("Drake", "Forever", "Relapse: Refill", "spotify:track:g8", "USUM70920707"),
+        ("Los Lonely Boys", "Heaven", "Los Lonely Boys", "spotify:track:g9", "USSM10315916"),
+    ]
+)
+
+
+def test_identifier_misses_drops_a_track_matched_by_isrc_under_another_uri() -> None:
+    """`Heaven` is on both sides under different URIs with one ISRC, so it is not a miss here."""
+    result = playlists.identifier_misses(GAP_LEFT, GAP_RIGHT, left_name="L", right_name="R")
+    assert "spotify:track:g3" not in set(result.rows["content_uri"])
+    assert result.miss_count == 2
+
+
+def test_identifier_misses_keeps_a_name_only_match_but_marks_it() -> None:
+    """The two-ISRC case stays in the list and is flagged, rather than being silently cleared."""
+    result = playlists.identifier_misses(GAP_LEFT, GAP_RIGHT, left_name="L", right_name="R")
+    forever = result.rows[result.rows["content_uri"] == "spotify:track:g1"]
+    assert len(forever) == 1, "a recording tier 2 cannot match must survive into this list"
+    assert bool(forever["cleared_by_name"].iloc[0]) is True
+    assert set(result.cleared["content_uri"]) == {"spotify:track:g1"}
+
+
+def test_identifier_misses_minus_the_name_clears_is_list_a() -> None:
+    """THE GUARD. The two lists Marc asked to see side by side must stay tied together.
+
+    `identifier_misses().strict` and `split_misses().absent` are computed by different routes — one
+    intersects the tier-1 and tier-2 miss sets and then marks name matches, the other tests ISRC and
+    name membership against the tier-1 misses directly. They must still land on the same tracks, or
+    §4.3 and §4.8 of the sandbox would show two lists that quietly disagree.
+
+    The fixture exercises both exclusion paths: `Heaven` leaves by ISRC, `Forever` by name only.
+    """
+    ident = playlists.identifier_misses(GAP_LEFT, GAP_RIGHT, left_name="L", right_name="R")
+    split = playlists.split_misses(GAP_LEFT, GAP_RIGHT, left_name="L", right_name="R")
+
+    assert set(ident.strict["content_uri"]) == set(split.absent["content_uri"])
+    assert len(ident.strict) + len(ident.cleared) == ident.miss_count
+    assert set(ident.strict["content_uri"]) == {"spotify:track:g2"}
+
+
+def test_identifier_misses_on_an_empty_left_side_is_empty() -> None:
+    empty = GAP_LEFT.iloc[0:0]
+    result = playlists.identifier_misses(empty, GAP_RIGHT, left_name="L", right_name="R")
+    assert result.miss_count == 0
+    assert len(result.strict) == 0 and len(result.cleared) == 0
+
+
 def test_list_a_and_list_b_partition_the_tier_one_misses() -> None:
     """THE GUARD (R-059). Disjoint, and together exactly the tier-1 miss set.
 
