@@ -48,6 +48,24 @@ table.dataframe {
 }
 table.dataframe td, table.dataframe th {
     border: 1.5px solid rgba(0,0,0,0.15) !important;
+    /* Left-align every cell, headers included (Marc, 2026-09-17).
+
+       Measured in the rendered report rather than assumed: no td or th carries a style
+       attribute, so values already fall back to the browser's left default. What was
+       right-aligned is the HEADER row. pandas emits a thead-th rule setting text-align right,
+       once per table, plus an inline text-align right on the header tr itself; both land after
+       nb2report's own left rule at equal specificity and so win on document order. The result
+       was right-aligned labels sitting over left-aligned data.
+
+       !important beats a non-important rule at any specificity, and a direct rule on th beats
+       the inline style inherited from tr, so this settles it here rather than in nb2report,
+       which is another project and not this one's to edit. No numeric column changes: they
+       were already left.
+
+       Deliberately no braces or backticks in this comment: it is emitted verbatim into the
+       report's stylesheet, and brace characters inside a comment survive a real CSS parser but
+       break naive ones, including the extractor used to verify this. */
+    text-align: left !important;
 }
 table.dataframe thead th {
     background-color: #f0f0f0 !important;
