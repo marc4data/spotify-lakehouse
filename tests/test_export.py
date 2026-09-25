@@ -159,3 +159,59 @@ def test_raw_export_record_is_append_only(db, tmp_path: Path) -> None:
             raise _Rollback
     except _Rollback:
         pass
+
+
+# --- Rebuild input gates (spot-main-R-062) -------------------------------------------------------
+
+
+def _export_dir(root: Path, slug: str, plays: list[tuple[str, str]], zip_body: bytes) -> Path:
+    """A profile directory holding a zip (for hashing) and its extracted file (for play keys)."""
+    directory = root / slug
+    directory.mkdir(parents=True)
+    (directory / f"{slug}.zip").write_bytes(zip_body)
+    (directory / "Streaming_History_Audio_2024.json").write_text(
+        json.dumps([{"ts": ts, "spotify_track_uri": uri, "ms_played": 1000} for ts, uri in plays])
+    )
+    return directory
+
+
+def test_rebuild_refuses_two_exports_that_are_the_same_file(tmp_path: Path) -> None:
+    """THE GUARD. One download served under two names is what R-044 could not recover from."""
+    same = b"PK-identical-archive"
+    _export_dir(tmp_path, "one", [("2024-01-01T00:00:00Z", "spotify:track:a")], same)
+    _export_dir(tmp_path, "two", [("2024-02-01T00:00:00Z", "spotify:track:b")], same)
+
+    with pytest.raises(export.ExportError) as caught:
+        export.check_rebuild_inputs(tmp_path, ["one", "two"])
+    assert "the same file" in str(caught.value)
+    assert "re-request" in str(caught.value)
+
+
+def test_rebuild_refuses_profiles_whose_plays_materially_overlap(tmp_path: Path) -> None:
+    """The gate is a RELATION, not a hash (Cowork, 2026-09-24).
+
+    R-062's prompt banned one md5. That cannot catch two files which differ by a byte yet carry the
+    same listening, and it wrongly condemns a file that is merely the sole surviving copy. Two
+    Spotify accounts do not independently produce the same play at the same millisecond.
+    """
+    shared = [(f"2024-01-01T00:{i:02d}:00Z", f"spotify:track:s{i}") for i in range(20)]
+    _export_dir(tmp_path, "one", shared, b"PK-archive-one")
+    _export_dir(tmp_path, "two", shared, b"PK-archive-two-different-bytes")
+
+    with pytest.raises(export.ExportError) as caught:
+        export.check_rebuild_inputs(tmp_path, ["one", "two"])
+    message = str(caught.value)
+    assert "share" in message and "100.00%" in message
+
+
+def test_rebuild_accepts_two_genuinely_different_people(tmp_path: Path) -> None:
+    """The real pair, measured 2026-09-24: 1 shared play in 60,080 — 0.0017%."""
+    left = [(f"2024-01-01T00:{i:02d}:00Z", f"spotify:track:l{i}") for i in range(50)]
+    right = [(f"2025-06-01T00:{i:02d}:00Z", f"spotify:track:r{i}") for i in range(50)]
+    right[0] = left[0]  # one coincidence must not condemn the pair
+    _export_dir(tmp_path, "one", left, b"PK-archive-one")
+    _export_dir(tmp_path, "two", right, b"PK-archive-two")
+
+    checked = export.check_rebuild_inputs(tmp_path, ["one", "two"])
+    assert checked.overlaps[("one", "two")] == pytest.approx(0.02)
+    assert checked.play_counts == {"one": 50, "two": 50}

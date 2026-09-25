@@ -13,6 +13,7 @@ unfinished file.
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import re
 import shutil
@@ -168,3 +169,184 @@ def load_profile(conn: psycopg.Connection, profile: str, profile_dir: Path) -> L
         summary.files.append(load_file(conn, profile, path))
     summary.seconds = time.monotonic() - started
     return summary
+
+
+# --- Rebuild (spot-main-R-062) -------------------------------------------------------------------
+#
+# Why this exists at all: `load_file` inserts `on conflict ... do nothing`, so re-loading the SAME
+# file is a clean no-op and re-loading a DIFFERENT one is a silent hybrid. R-044 measured that
+# happening — one child's export was loaded under two slugs, a corrective load added 91 rows, and
+# three files ended up holding the first N records from one person and the rest from another. `raw`
+# is append-only (data-contracts §1), so the bad rows could not be removed and the bad load blocked
+# its own fix.
+#
+# The way back is the one §1 already anticipates: the zip is the immutable original, so the table is
+# reconstructible from it. This rebuilds wholesale rather than surgically deleting the bad rows — a
+# targeted delete would trade §1's guarantee for a loading convenience, while a full reconstruction
+# from the stated source of truth honours it.
+
+#: Two profiles sharing more than this share of the smaller one's plays are the same export.
+#: Measured 2026-09-24: the genuine pair (brody/emma) shares 1 play in 60,080 — 0.0017%. The
+#: duplicated pair shared 99.84%. Anything between is not a family resemblance; two Spotify accounts
+#: do not independently produce the same play at the same millisecond.
+MATERIAL_OVERLAP = 0.05
+
+#: Gate 1's control: this profile must reproduce byte-for-byte or the rebuild is not trustworthy.
+CONTROL_PROFILE = "marc"
+
+
+@dataclass(frozen=True)
+class InputCheck:
+    """What the inputs on disk are, before anything is destroyed."""
+
+    digests: dict[str, str]
+    play_counts: dict[str, int]
+    overlaps: dict[tuple[str, str], float]
+
+
+def zip_digest(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.md5()  # noqa: S324 - file identity, not a security boundary
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def profile_play_keys(profile_dir: Path) -> set[tuple[str | None, str | None]]:
+    """(timestamp, content uri) for every play in a profile's extracted export."""
+    keys: set[tuple[str | None, str | None]] = set()
+    for path in discover_files(profile_dir):
+        for record in read_records(path):
+            keys.add(
+                (
+                    record.get("ts"),
+                    record.get("spotify_track_uri")
+                    or record.get("spotify_episode_uri")
+                    or record.get("audiobook_chapter_uri"),
+                )
+            )
+    return keys
+
+
+def check_rebuild_inputs(exports_root: Path, profiles: list[str]) -> InputCheck:
+    """Refuse to rebuild from inputs that cannot be told apart. Raises ExportError with the reason.
+
+    🚨 The gate is a RELATION, not a hash (spot-main-R-062, corrected by Cowork). R-062's prompt
+    originally banned one specific md5 — the file that had arrived under two children's names. That
+    is the wrong shape: the file was never bad, the *duplication* was, and by the time the round ran
+    that same hash was the sole remaining copy and entirely legitimate. A banned-hash list also goes
+    stale the moment anyone re-downloads, and it cannot catch a duplication between two files that
+    differ by a byte.
+
+    What actually has to hold is that the inputs can be told apart: every zip distinct, and no two
+    profiles carrying materially the same plays.
+    """
+    digests: dict[str, str] = {}
+    for profile in profiles:
+        archives = sorted((exports_root / profile).glob("*.zip"))
+        if not archives:
+            raise ExportError(f"{exports_root / profile} holds no zip to rebuild from")
+        for archive in archives:
+            digests[f"{profile}/{archive.name}"] = zip_digest(archive)
+
+    seen: dict[str, str] = {}
+    for name, digest in digests.items():
+        if digest in seen:
+            raise ExportError(
+                f"two exports are the same file: {seen[digest]!r} and {name!r} both hash to "
+                f"{digest}. One download was served twice; re-request the second before rebuilding."
+            )
+        seen[digest] = name
+
+    keys = {profile: profile_play_keys(exports_root / profile) for profile in profiles}
+    play_counts = {profile: len(k) for profile, k in keys.items()}
+    overlaps: dict[tuple[str, str], float] = {}
+    for left, right in itertools.combinations(sorted(profiles), 2):
+        smaller = min(len(keys[left]), len(keys[right])) or 1
+        share = len(keys[left] & keys[right]) / smaller
+        overlaps[(left, right)] = share
+        if share > MATERIAL_OVERLAP:
+            raise ExportError(
+                f"{left!r} and {right!r} share {share:.2%} of the smaller export's plays. Two "
+                "accounts do not independently produce the same play at the same millisecond — "
+                "one of these is the other's export under the wrong name."
+            )
+    return InputCheck(digests=digests, play_counts=play_counts, overlaps=overlaps)
+
+
+def content_fingerprints(conn: psycopg.Connection) -> dict[str, tuple[int, str]]:
+    """Rows and an order-independent content fingerprint per profile, straight from raw."""
+    rows = conn.execute(
+        "select profile_slug, count(*), "
+        "md5(string_agg(coalesce(payload ->> 'ts', '') || '~' || "
+        "coalesce(payload ->> 'spotify_track_uri', ''), '|' "
+        "order by coalesce(payload ->> 'ts', ''), "
+        "coalesce(payload ->> 'spotify_track_uri', ''))) "
+        "from raw.export_record group by profile_slug"
+    ).fetchall()
+    return {slug: (count, fingerprint) for slug, count, fingerprint in rows}
+
+
+@dataclass
+class RebuildResult:
+    before: dict[str, tuple[int, str]]
+    after: dict[str, tuple[int, str]]
+    inputs: InputCheck
+    summaries: dict[str, LoadSummary]
+    seconds: float = 0.0
+
+    @property
+    def control_reproduced(self) -> bool:
+        return self.before.get(CONTROL_PROFILE) == self.after.get(CONTROL_PROFILE)
+
+
+def rebuild_export_record(
+    conn: psycopg.Connection,
+    exports_root: Path,
+    profiles: list[str],
+    *,
+    control: str = CONTROL_PROFILE,
+) -> RebuildResult:
+    """Reconstruct raw.export_record wholesale from the zips on disk, in one transaction.
+
+    🚨 Gate 1 is absolute: the control profile must reproduce byte-for-byte — same row count, same
+    content fingerprint. If it does not, the rebuild is wrong and every other figure it produces is
+    worthless, so the transaction rolls back and nothing is changed.
+
+    The triggers are disabled only for the truncate and only inside this transaction, which is the
+    same shape data-contracts §1 already sanctions for a backfilling migration. Postgres TRUNCATE is
+    transactional, so a failed control restores every row.
+    """
+    started = time.monotonic()
+    inputs = check_rebuild_inputs(exports_root, profiles)
+    before = content_fingerprints(conn)
+    if control not in before:
+        raise ExportError(
+            f"control profile {control!r} has no rows to reproduce; refusing to rebuild"
+        )
+
+    summaries: dict[str, LoadSummary] = {}
+    with conn.transaction():
+        conn.execute("alter table raw.export_record disable trigger export_record_no_truncate")
+        try:
+            conn.execute("truncate table raw.export_record")
+        finally:
+            conn.execute("alter table raw.export_record enable trigger export_record_no_truncate")
+        for profile in profiles:
+            summaries[profile] = load_profile(conn, profile, exports_root / profile)
+        after = content_fingerprints(conn)
+        if before.get(control) != after.get(control):
+            raise ExportError(
+                f"GATE 1 FAILED: control profile {control!r} did not reproduce. "
+                f"before={before.get(control)} after={after.get(control)}. "
+                "The rebuild is wrong; nothing was changed."
+            )
+    return RebuildResult(
+        before=before,
+        after=after,
+        inputs=inputs,
+        summaries=summaries,
+        seconds=time.monotonic() - started,
+    )

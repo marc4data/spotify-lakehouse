@@ -434,6 +434,58 @@ def cmd_load_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rebuild_export(args: argparse.Namespace) -> int:
+    """Reconstruct raw.export_record from the zips (spot-main-R-062).
+
+    Destructive and irreversible in the sense that it discards the table's current contents — but
+    *repeatable*, which is the whole point: the zips are the immutable original (data-contracts §1),
+    so the table can be rebuilt again from the same inputs. That is why releasing a stuck gate beats
+    re-requesting an export.
+    """
+    if not args.yes:
+        print(
+            "spot rebuild-export: refusing without --yes. This discards every row in "
+            "raw.export_record and reconstructs it from the zips on disk.",
+            file=sys.stderr,
+        )
+        return 2
+    root = export.exports_dir()
+    profiles = sorted(d.name for d in root.iterdir() if d.is_dir() and any(d.glob("*.zip")))
+    if not profiles:
+        raise ConfigError(f"{root} holds no profile directory with a zip to rebuild from")
+    settings = load_settings(require_spotify=False)
+    with (
+        connect(settings, autocommit=True) as conn,
+        try_advisory_lock(conn, export.LOCK_NAME) as acquired,
+    ):
+        if not acquired:
+            print(
+                f"spot rebuild-export: the {export.LOCK_NAME} lock is held elsewhere",
+                file=sys.stderr,
+            )
+            return 1
+        for profile in profiles:
+            export.extract_archives(root / profile)
+        try:
+            result = export.rebuild_export_record(conn, root, profiles, control=args.control)
+        except export.ExportError as exc:
+            print(f"spot rebuild-export: {exc}", file=sys.stderr)
+            return 1
+    print(f"inputs checked: {len(result.inputs.digests)} zip(s), all distinct")
+    for name, digest in sorted(result.inputs.digests.items()):
+        print(f"  {digest}  {name}")
+    for (left, right), share in sorted(result.inputs.overlaps.items()):
+        print(f"  overlap {left} vs {right}: {share:.4%}")
+    verdict = "reproduced" if result.control_reproduced else "FAILED"
+    print(f"\nGATE 1 control={args.control}: {verdict}")
+    for profile in profiles:
+        before = result.before.get(profile)
+        after = result.after.get(profile)
+        print(f"  {profile:8} before={before} after={after}")
+    print(f"\nrebuilt in {result.seconds:.1f} s")
+    return 0
+
+
 def _iso(value: datetime | None) -> str:
     if value is None:
         return "none"
@@ -669,6 +721,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_export.add_argument("--profile", required=True, help="profile slug, e.g. marc")
     p_export.set_defaults(func=cmd_load_export)
+
+    p_rebuild = sub.add_parser(
+        "rebuild-export",
+        help="DESTRUCTIVE: reconstruct raw.export_record wholesale from the zips on disk",
+    )
+    p_rebuild.add_argument(
+        "--control",
+        default=export.CONTROL_PROFILE,
+        help="profile that must reproduce byte-for-byte or the rebuild rolls back",
+    )
+    p_rebuild.add_argument(
+        "--yes", action="store_true", help="required: this destroys and rebuilds every row"
+    )
+    p_rebuild.set_defaults(func=cmd_rebuild_export)
 
     p_mb = sub.add_parser(
         "resolve-musicbrainz",
