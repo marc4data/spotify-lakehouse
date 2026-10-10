@@ -1,6 +1,6 @@
 # Notebook Specifications
 
-Four notebooks, each rendered through **nb2report** into standalone HTML. (§4 is reserved for R-044's household comparison, which is parked and unbuilt, so the numbering skips it.)
+Five notebooks, each rendered through **nb2report** into standalone HTML. (§4 is reserved for R-044's household comparison, which is parked and unbuilt, so the numbering skips it.)
 
 ```bash
 uv run nb2report notebooks/01_data_inventory.ipynb \
@@ -402,3 +402,48 @@ answerable from the warehouse.**
 at a known-good state, `nbstripout` strips outputs on commit as it does for every other notebook, and
 **§5 is committed empty** so a diff shows only what Marc added. His own edits are his to keep or
 discard; nothing here tries to stop him dirtying it.
+
+---
+
+## 6. `06_playlist_sheet.ipynb` — one playlist as a spreadsheet
+
+**Purpose:** Marc's request, 2026-10-09 — *"gather the songs in a playlist parameter … Output is
+something I can copy/paste into excel and create some metadata."* A worksheet, not a report.
+
+**Scope:** reads the warehouse, makes **zero API calls**. Takes a **PLAYLIST as well as a PROFILE**:
+`make report-06 PROFILE=<slug> PLAYLIST='<name>'`. The profile scopes the play counts; the playlist
+chooses the rows. Writes `published/playlist_<name>.csv`, which is gitignored.
+
+```
+# Playlist Sheet
+## 1. Connect                       [setup(), and which playlist was asked for]
+## 2. Does the playlist resolve?    [a name matching nothing and a name matching a playlist with
+                                     nothing LOADED are different problems and read differently;
+                                     candidates() shows `loaded`, which is the column that matters]
+## 3. The sheet                     [one row per track, playlist order, 22 columns]
+## 4. What is actually populated    [coverage(), COMPUTED from the frame, never asserted]
+## 5. The file to open in Excel     [published/*.csv]
+```
+
+🚨 **`key`, `bpm` and `notes` are blank columns BY DESIGN.** Marc asked for key and rpm so he could
+annotate them. Neither exists here, and that is measured rather than read off the API reference:
+`/audio-features` is cut off for apps registered after 2024-11-27, and in this warehouse **0 rows
+carry a `"tempo": <number>` field** while `danceability`, `valence`, `time_signature` and `loudness`
+appear in **0 rows**. An audio-features payload always carries danceability beside tempo, so its
+absence is the control. ⚠️ **A tidy-up that drops "empty" columns removes the point of the notebook**
+— `tests/test_playlist_sheet.py::test_the_sheet_keeps_blank_columns_for_hand_annotation` exists to
+stop that, because nothing else would fail.
+
+⚠️ **`duration` and `isrc` come from the playlist payload, not the marts.**
+`dim_content.duration_ms` is NULL for any track reaching it through the export branch, so a track the
+household has actually *played* loses the duration the payload supplied. Measured on
+`College Throwbacks`: **87 of 87** in `int_playlist_content`, **18** durations and **17** ISRCs in
+`dim_content` / `dim_track_detail`. Guarded by
+`test_duration_comes_from_the_playlist_payload_not_dim_content`.
+
+**The API-resolved columns are sparse and the notebook says so in §4.** `album`, `year`, `explicit`,
+`track_no` and `album_type` need a `GET /tracks/{id}` lookup — 17 of 87 above. `spot resolve-tracks
+--run` fills them at ~1 call/s. The densest enrichment is the household's own listening: `plays`,
+`minutes`, `first_played`, `last_played`, at 86 of 87. **The warehouse knows more about how these
+tracks were listened to than about what they are**, which is worth knowing before designing a sheet
+around album metadata.

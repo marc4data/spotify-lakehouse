@@ -3,7 +3,7 @@ CONFIG_DIR ?= $(HOME)/.config/spot
 COMPOSE := docker compose --env-file $(CONFIG_DIR)/.env
 
 .PHONY: help bootstrap db-up db-down migrate dbt-parse dbt-build dbt-test dbt-profile test lint format \
-	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 report-02 report-03 report-05 publish playlists notebook worktree worktree-remove
+	launchd-install launchd-uninstall refresh-status musicbrainz load-export resolve-tracks report-01 report-02 report-03 report-05 report-06 publish playlists notebook worktree worktree-remove
 
 help:
 	@echo "bootstrap    one command to make this checkout fully operational (idempotent)"
@@ -22,6 +22,7 @@ help:
 	@echo "playlists PROFILE=marc   fetch every playlist and its items into raw (spot_playlists lock)"
 	@echo "publish PROFILE=marc     regenerate published/*.csv from the marts (uploads nothing)"
 	@echo "report-05 PROFILE=marc  render notebooks/05_sandbox.ipynb for one profile"
+	@echo "report-06 PROFILE=marc PLAYLIST='My Mix'  one playlist as a spreadsheet (published/playlist_*.csv)"
 	@echo "worktree NAME=wtc          create ../spotify-wtc, bootstrap it, print what it provisioned"
 	@echo "worktree-remove NAME=wtc   remove it, delete its branch if merged, drop its schemas"
 	@echo "test / lint / format"
@@ -122,6 +123,23 @@ report-05:
 		--author "Marc Alexander" --toc-depth 3 -o "reports/05_sandbox_$(PROFILE).html"
 	uv run nbstripout notebooks/05_sandbox.ipynb
 	@echo "Report: reports/05_sandbox_$(PROFILE).html (notebook outputs stripped again)"
+
+# One playlist as a spreadsheet for hand-annotation (Marc, 2026-10-09). Takes a PLAYLIST as well as a
+# PROFILE: the profile scopes the play counts, the playlist chooses the rows. PLAYLIST is quoted in the
+# recipe because playlist names carry spaces and apostrophes — `Dad's College Indie Pop/Rock` is real.
+report-06:
+	@test -n "$(PROFILE)" || { echo "usage: make report-06 PROFILE=<slug> PLAYLIST='<name>'" >&2; exit 2; }
+	@test -n "$(PLAYLIST)" || { echo "usage: make report-06 PROFILE=<slug> PLAYLIST='<name>'" >&2; exit 2; }
+	SPOT_PROFILE="$(PROFILE)" uv run python -m spotify_lakehouse.notebook
+	SPOT_PROFILE="$(PROFILE)" SPOT_PLAYLIST="$(PLAYLIST)" uv run jupyter nbconvert \
+		--to notebook --execute --inplace \
+		--ExecutePreprocessor.timeout=900 notebooks/06_playlist_sheet.ipynb
+	mkdir -p reports
+	uv run --with-editable $(NB2REPORT) nb2report notebooks/06_playlist_sheet.ipynb \
+		--author "Marc Alexander" --toc-depth 3 -o "reports/06_playlist_sheet_$(PROFILE).html"
+	uv run nbstripout notebooks/06_playlist_sheet.ipynb
+	@echo "Report: reports/06_playlist_sheet_$(PROFILE).html"
+	@echo "Sheet:  published/playlist_*.csv (open in Excel)"
 
 # Flat extracts for Tableau Public, which cannot source a database (CLAUDE.md §4, R-007).
 # published/ is gitignored: the files are derived and personal even though a workbook built on
