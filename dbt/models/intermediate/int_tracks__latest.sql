@@ -1,3 +1,9 @@
+{{ config(materialized='table') }}
+
+-- A TABLE, not a view (spot-main-R-065): unioned into `dim_content`'s `match_keys` CTE alongside the
+-- other two branches, where a view's missing statistics produced a Nested Loop costing 338 s. Small
+-- in itself (1,307 rows); materialised for the estimate, not for its own size.
+--
 -- One row per track URI: attributes from its most recent observation (SCD Type 1 source for dim_content,
 -- dim_track_detail). An observation is a recently-played item or, since R-037, a GET /tracks/{id} lookup of an
 -- export URI. first/last seen come from recently-played plays only (NULL for a lookup-only track); dim_content

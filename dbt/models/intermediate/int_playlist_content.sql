@@ -1,3 +1,9 @@
+{{ config(materialized='table') }}
+
+-- A TABLE, not a view (spot-main-R-065): unioned into `dim_content`'s `match_keys` CTE, where a
+-- view's missing statistics produced a Nested Loop costing 338 s. Small in itself (~4,700 rows);
+-- materialised for the estimate, not for its own size.
+--
 -- int_playlist_content: one row per distinct track ever seen in a playlist (spot-main-R-054).
 --
 -- The mirror of `int_export_content`. A track is content whether or not anyone played it: R-054

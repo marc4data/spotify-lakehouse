@@ -1,3 +1,12 @@
+{{ config(materialized='table') }}
+
+-- 🚨 A TABLE, not a view (spot-main-R-065). `dim_content` references this model THREE times — in
+-- `combined`, in `match_keys`, and in the playlist branch's `not exists` — and a view is re-executed
+-- on every reference. Worse, a view carries no statistics, so the planner estimated `match_keys`'s
+-- join at 583 rows against an actual 60,717 and chose a Nested Loop that re-ran this branch once per
+-- outer row: **338 of dim_content's 343 seconds**, measured. This branch is the expensive one,
+-- because it scans 383,152 export rows. With a table the planner has real row counts and can hash.
+--
 -- One row per track, episode or audiobook chapter URI seen in an export, described by the export's own metadata from its most
 -- recent play (spot-main-R-003). dim_content uses it for content the API has never resolved: data-contracts §3
 -- requires such content to get a real row with is_resolved = false, never an unknown member.
